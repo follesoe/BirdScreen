@@ -1,0 +1,43 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Claude Code local settings (per-machine; not shared)
+.claude/settings.local.json
+
+# BirdNET-Go binaries & libraries (installed under ~/birdnet-go, not in-repo;
+# ignore here in case build/download artifacts land in the working tree)
+birdnet-go
+*.tar.gz
+*.dylib
+*.so
+*.dll
+
+# BirdNET-Go local data, models, logs & config
+data/
+logs/
+*.log
+config.yaml
+*.db
+*.db-shm
+*.db-wal
+*.db-journal
+*.sqlite
+*.sqlite3
+clips/
+recordings/
+*.wav
+*.mp3
+*.flac
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*~
+
+# Environment
+.env
+.env.local
