@@ -1,5 +1,9 @@
 # BirdScreen
 
+<p align="center">
+  <img src="assets/birdscreen-logo.webp" alt="BirdScreen — a robin in headphones painting a field-guide plate of birds" width="420">
+</p>
+
 Turn the birds you actually hear into a living piece of art on the wall.
 
 BirdScreen listens for birds with [BirdNET-Go](https://github.com/tphakala/birdnet-go),
