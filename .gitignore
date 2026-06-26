@@ -17,6 +17,7 @@ birdnet-go
 
 # BirdNET-Go local data, models, logs & config
 data/
+cache/
 logs/
 *.log
 config.yaml
@@ -32,6 +33,17 @@ recordings/
 *.mp3
 *.flac
 
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
 # Editor / IDE
 .vscode/
 .idea/
@@ -41,3 +53,6 @@ recordings/
 # Environment
 .env
 .env.local
+
+# Samsung TV auth token (paired per-device; not shared)
+.tv-token*
