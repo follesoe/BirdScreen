@@ -17,6 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from PIL import Image
 from pydantic import BaseModel
 
+from birdscreen.config import ScheduleConfig, SettingsConfig, load_config, save_config
 from birdscreen.logging_config import recent_logs, setup_logging
 
 logger = logging.getLogger(__name__)
@@ -105,6 +106,28 @@ def create_app() -> FastAPI:
     @app.get("/api/logs")
     def logs() -> dict[str, list[str]]:
         return {"lines": recent_logs()}
+
+    @app.get("/api/config/schedule")
+    def get_schedule() -> ScheduleConfig:
+        return load_config().schedule
+
+    @app.put("/api/config/schedule")
+    def put_schedule(schedule: ScheduleConfig) -> ScheduleConfig:
+        config = load_config()
+        config.schedule = schedule
+        save_config(config)
+        return config.schedule
+
+    @app.get("/api/config/settings")
+    def get_settings() -> SettingsConfig:
+        return load_config().settings
+
+    @app.put("/api/config/settings")
+    def put_settings(settings: SettingsConfig) -> SettingsConfig:
+        config = load_config()
+        config.settings = settings
+        save_config(config)
+        return config.settings
 
     if FRONTEND_DIST.is_dir():
         app.mount("/", StaticFiles(directory=FRONTEND_DIST, html=True), name="frontend")
