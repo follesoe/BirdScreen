@@ -17,6 +17,7 @@ a local ``.env`` for convenience.
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 import sys
 import time
@@ -27,7 +28,10 @@ from dotenv import find_dotenv, load_dotenv
 from google import genai
 from google.genai import errors, types
 
+from birdscreen.logging_config import setup_logging
 from birdscreen.usage import Usage, summarize, usage_from_response
+
+logger = logging.getLogger(__name__)
 
 # Search upward from CWD so a project-root .env is found even when installed.
 load_dotenv(find_dotenv(usecwd=True))
@@ -111,10 +115,12 @@ def generate_image(
         except Exception as exc:
             if _is_transient(exc) and attempt < _MAX_RETRIES - 1:
                 wait = _RETRY_DELAY * (attempt + 1)
-                print(
-                    f"  transient error ({getattr(exc, 'code', type(exc).__name__)}); "
-                    f"retrying in {wait:.0f}s [{attempt + 1}/{_MAX_RETRIES - 1}]",
-                    file=sys.stderr,
+                logger.warning(
+                    "Transient error (%s); retrying in %.0fs [%d/%d]",
+                    getattr(exc, "code", type(exc).__name__),
+                    wait,
+                    attempt + 1,
+                    _MAX_RETRIES - 1,
                 )
                 time.sleep(wait)
                 continue
@@ -164,13 +170,14 @@ def main() -> None:
         help="List available image models and exit (requires API key).",
     )
     args = parser.parse_args()
+    setup_logging()
 
     if args.list_models:
         try:
             for name in list_image_models():
-                print(name)
-        except Exception as exc:
-            print(f"✗ {exc}")
+                print(name)  # data output to stdout
+        except Exception:
+            logger.exception("Could not list models")
             sys.exit(1)
         sys.exit(0)
 
@@ -181,7 +188,7 @@ def main() -> None:
         parser.error("provide a prompt (positional) or --prompt-file")
 
     usage: list[Usage] = []
-    print(f"Generating with {args.model} ({args.aspect}, {args.size})...")
+    logger.info("Generating with %s (%s, %s)...", args.model, args.aspect, args.size)
     try:
         out = generate_image(
             prompt,
@@ -191,13 +198,12 @@ def main() -> None:
             image_size=args.size,
             usage_sink=usage,
         )
-    except Exception as exc:
-        print(f"✗ Generation failed: {type(exc).__name__}: {exc}")
+    except Exception:
+        logger.exception("Generation failed")
         sys.exit(1)
 
-    print(f"✓ Saved {out} ({out.stat().st_size} bytes)")
-    print("Token usage / estimated cost:")
-    print(summarize(usage))
+    logger.info("Saved %s (%d bytes)", out, out.stat().st_size)
+    logger.info("Token usage / estimated cost:\n%s", summarize(usage))
     sys.exit(0)
 
 

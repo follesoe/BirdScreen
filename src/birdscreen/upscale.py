@@ -12,6 +12,7 @@ without torch/spandrel installed.
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,9 @@ from PIL import Image
 from spandrel import ImageModelDescriptor, ModelLoader
 
 from birdscreen.images import prepare_for_frame
+from birdscreen.logging_config import setup_logging
+
+logger = logging.getLogger(__name__)
 
 # Real-ESRGAN model weights (downloaded on first use).
 MODELS: dict[str, str] = {
@@ -41,7 +45,7 @@ def _model_path(model: str) -> Path:
     path = MODEL_DIR / (MODELS[model].rsplit("/", 1)[-1])
     if not path.exists():
         url = MODELS[model]
-        print(f"  downloading {model} weights ({url.rsplit('/', 1)[-1]})...")
+        logger.info("Downloading %s weights (%s)...", model, url.rsplit("/", 1)[-1])
         with requests.get(url, stream=True, timeout=120) as resp:
             resp.raise_for_status()
             with path.open("wb") as fh:
@@ -103,7 +107,7 @@ def super_resolve(
     except RuntimeError as exc:  # e.g. MPS out-of-memory -> retry whole thing on CPU
         if dev == "cpu":
             raise
-        print(f"  {dev} failed ({exc}); retrying on CPU...")
+        logger.warning("%s failed (%s); retrying on CPU...", dev, exc)
         descriptor.to("cpu")
         out = _run_tiled(descriptor, tensor, scale, "cpu", tile, overlap)
 
@@ -156,6 +160,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
+    setup_logging()
     parser = _build_parser()
     args = parser.parse_args()
 
@@ -169,11 +174,11 @@ def main() -> None:
         except ValueError:
             parser.error("--size must look like 3840x2160 or 'native'")
 
-    print(f"Upscaling {args.src} with {args.model} (device: {args.device or 'auto'})...")
+    logger.info("Upscaling %s with %s (device: %s)...", args.src, args.model, args.device or "auto")
     out = upscale_image(args.src, args.out, target=target, model=args.model, device=args.device)
     with Image.open(out) as im:
         size = im.size
-    print(f"✓ Saved {out} ({out.stat().st_size} bytes, {size[0]}x{size[1]})")
+    logger.info("Saved %s (%d bytes, %dx%d)", out, out.stat().st_size, size[0], size[1])
     sys.exit(0)
 
 

@@ -46,6 +46,10 @@ dist/
 .ruff_cache/
 .mypy_cache/
 
+# Frontend (node)
+node_modules/
+*.tsbuildinfo
+
 # Editor / IDE
 .vscode/
 .idea/

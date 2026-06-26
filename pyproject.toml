@@ -23,6 +23,7 @@ generate-poster = "birdscreen.gemini:main"
 build-prompt = "birdscreen.poster:main"
 make-poster = "birdscreen.pipeline:main"
 upscale = "birdscreen.upscale:main"
+birdscreen-web = "birdscreen.web.app:main"
 
 [project.optional-dependencies]
 upscale = [

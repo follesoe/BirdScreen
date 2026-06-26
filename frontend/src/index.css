@@ -1,0 +1,30 @@
+@import 'tailwindcss';
+
+/* Theme tokens as CSS variables (also exposed as Tailwind utilities, e.g.
+   bg-parchment / text-ink / text-robin / font-display). Palette sampled from
+   the robin logo. */
+@theme {
+  --color-parchment: #f8efdb;
+  --color-parchment-deep: #efe2c6;
+  --color-ink: #4a3a28;
+  --color-ink-soft: #6d4f32;
+  --color-robin: #c8612f;
+  --color-amber: #d2a266;
+  --color-bark: #93724f;
+  --color-sage: #7d8a6a;
+
+  --font-body: 'EB Garamond', Georgia, serif;
+  --font-display: 'Cormorant Garamond', Georgia, serif;
+}
+
+:root {
+  color-scheme: light;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background-color: var(--color-parchment);
+  color: var(--color-ink);
+  font-family: var(--font-body);
+}

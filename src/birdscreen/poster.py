@@ -12,7 +12,7 @@ object, so it can be cached or precomputed per location.
 from __future__ import annotations
 
 import argparse
-import sys
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -21,9 +21,12 @@ from google import genai
 
 from birdscreen.gemini import DEFAULT_IMAGE_MODEL
 from birdscreen.geocode import reverse_geocode
+from birdscreen.logging_config import setup_logging
 from birdscreen.season import SeasonInfo, describe_environment_llm
 from birdscreen.usage import Usage, summarize
 from birdscreen.weather import Weather, fetch_current_weather
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_TITLE = "Hørt i dag"
 DEFAULT_LANGUAGE = "Norwegian"
@@ -265,6 +268,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
+    setup_logging()
     parser = _build_parser()
     args = parser.parse_args()
 
@@ -292,22 +296,24 @@ def main() -> None:
     prompt, ctx, env = build_daily_prompt(request, usage_sink=usage)
 
     weather_text = ctx.weather.describe() if ctx.weather else "(skipped)"
-    print(
-        f"[location] {ctx.location_name}\n"
-        f"[when]     {when:%Y-%m-%d %H:%M}\n"
-        f"[size]     {width}x{height} -> {aspect_ratio(width, height)} / "
-        f"{image_size_tier(width, height)}\n"
-        f"[season]   {env.season}\n"
-        f"[weather]  {weather_text}\n"
-        f"[usage]    {summarize(usage)}",
-        file=sys.stderr,
+    logger.info(
+        "location=%s | when=%s | %dx%d -> %s/%s | season=%s | weather=%s | usage: %s",
+        ctx.location_name,
+        f"{when:%Y-%m-%d %H:%M}",
+        width,
+        height,
+        aspect_ratio(width, height),
+        image_size_tier(width, height),
+        env.season,
+        weather_text,
+        summarize(usage),
     )
 
     if args.out:
         Path(args.out).write_text(prompt, encoding="utf-8")
-        print(f"wrote {args.out}", file=sys.stderr)
+        logger.info("Wrote prompt to %s", args.out)
     else:
-        print(prompt)
+        print(prompt)  # data output to stdout
 
 
 if __name__ == "__main__":

@@ -12,6 +12,7 @@ Posters are written to ``posters/`` with a lexically-sortable, descriptive name:
 from __future__ import annotations
 
 import argparse
+import logging
 import re
 import sys
 import unicodedata
@@ -24,6 +25,7 @@ from PIL import Image
 from birdscreen.gemini import DEFAULT_IMAGE_MODEL, generate_image
 from birdscreen.images import prepare_for_frame
 from birdscreen.labels import compose_poster
+from birdscreen.logging_config import setup_logging
 from birdscreen.poster import (
     DEFAULT_LANGUAGE,
     DEFAULT_OUT_DIR,
@@ -52,6 +54,9 @@ _WEATHER_CONDITIONS = [
     "snow",
     "thunder",
 ]
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -138,19 +143,25 @@ def make_poster(
     usage_sink: list[Usage] | None = None,
 ) -> RenderResult:
     """Build the prompt, generate the image, normalise it, and save it."""
-    prompt, ctx, env = build_daily_prompt(request, weather=weather, usage_sink=usage_sink)
     size = (request.width, request.height)
+    tier = request.image_size or image_size_tier(*size)
+    logger.info(
+        "Resolving scene + building prompt (aspect %s, tier %s)...", aspect_ratio(*size), tier
+    )
+    prompt, ctx, env = build_daily_prompt(request, weather=weather, usage_sink=usage_sink)
+    logger.info("Location: %s | season: %s", ctx.location_name, env.season)
 
     base = _output_base(request, ctx.location_name)
     base.with_suffix(".txt").write_text(prompt, encoding="utf-8")  # prompt alongside
 
+    logger.info("Generating image with %s...", request.model)
     raw = base.with_suffix(".raw")
     generate_image(
         prompt,
         raw,
         model=request.model,
         aspect_ratio=aspect_ratio(*size),
-        image_size=request.image_size or image_size_tier(*size),
+        image_size=tier,
         usage_sink=usage_sink,
     )
 
@@ -162,6 +173,7 @@ def make_poster(
     if not request.labels:
         labeled = final.with_name(f"{final.stem}_labeled.jpg")
         final = compose_poster(final, labeled, title=request.title, birds=request.birds, size=size)
+    logger.info("Saved poster: %s", final)
     return RenderResult(final, prompt, ctx, env)
 
 
@@ -256,18 +268,19 @@ def _report(result: RenderResult, usage: list[Usage]) -> None:
     with Image.open(result.image_path) as im:
         actual_w, actual_h = im.size
     weather = result.context.weather
-    print(f"      location: {result.context.location_name} | season: {result.environment.season}")
-    print(f"      weather:  {weather.describe() if weather else '(skipped)'}")
-    print(
-        f"✓ Image:  {result.image_path} "
-        f"({result.image_path.stat().st_size} bytes, {actual_w}x{actual_h})"
+    logger.info("Weather: %s", weather.describe() if weather else "(skipped)")
+    logger.info(
+        "Image: %s (%d bytes, %dx%d)",
+        result.image_path,
+        result.image_path.stat().st_size,
+        actual_w,
+        actual_h,
     )
-    print(f"  Prompt: {result.image_path.with_suffix('.txt')}")
-    print("Token usage / estimated cost:")
-    print(summarize(usage))
+    logger.info("Token usage / estimated cost:\n%s", summarize(usage))
 
 
 def main() -> None:
+    setup_logging()
     parser = _build_parser()
     args = parser.parse_args()
 
@@ -290,32 +303,21 @@ def main() -> None:
     )
     request = _request_from_args(args, when, size)
 
-    tier = request.image_size or image_size_tier(*size)
-    finishing = (
-        f"upscale to {size[0]}x{size[1]} ({args.upscale_model})"
-        if args.upscale
-        else ("no scaling" if args.no_scale else f"downscale to {size[0]}x{size[1]}")
-    )
-    print(
-        f"[1/3] Building prompt (aspect {aspect_ratio(*size)}, render tier {tier}, {finishing})..."
-    )
-    print(f"[2/3] Generating image with {request.model} (this can take a while)...")
-
     usage: list[Usage] = []
     try:
         result = make_poster(request, weather=weather, usage_sink=usage)
-    except Exception as exc:  # CLI boundary: report and exit
-        print(f"✗ Failed: {type(exc).__name__}: {exc}")
+    except Exception:
+        logger.exception("Poster generation failed")
         sys.exit(1)
     _report(result, usage)
 
     if args.tv:
-        print(f"[3/3] Uploading to TV {args.tv} (accept the popup if shown)...")
+        logger.info("Uploading to TV %s (accept the popup if shown)...", args.tv)
         try:
             content_id = upload_image(args.tv, result.image_path, token_file=args.token_file)
-            print(f"✓ Uploaded + displayed on {args.tv}: {content_id}")
-        except Exception as exc:  # CLI boundary: report and exit
-            print(f"✗ TV upload failed: {type(exc).__name__}: {exc}")
+            logger.info("Uploaded + displayed on %s: %s", args.tv, content_id)
+        except Exception:
+            logger.exception("TV upload failed")
             sys.exit(2)
 
     sys.exit(0)
