@@ -50,11 +50,22 @@ class SettingsConfig(BaseModel):
     use_weather: bool = True
 
 
+class TvConfig(BaseModel):
+    """A Samsung Frame TV that displays the posters."""
+
+    name: str = "Frame TV"
+    ip: str = ""
+    # Only paint when the TV is in Art Mode; also a cue to watch for it entering
+    # Art Mode so we can render a fresh picture while it's ready to show one.
+    monitor_art_mode: bool = True
+
+
 class BirdScreenConfig(BaseModel):
     """Top-level config; grows as more settings screens are added."""
 
     schedule: ScheduleConfig = Field(default_factory=ScheduleConfig)
     settings: SettingsConfig = Field(default_factory=SettingsConfig)
+    tvs: list[TvConfig] = Field(default_factory=list)
 
 
 def load_config() -> BirdScreenConfig:

@@ -17,8 +17,9 @@ from fastapi.staticfiles import StaticFiles
 from PIL import Image
 from pydantic import BaseModel
 
-from birdscreen.config import ScheduleConfig, SettingsConfig, load_config, save_config
+from birdscreen.config import ScheduleConfig, SettingsConfig, TvConfig, load_config, save_config
 from birdscreen.logging_config import recent_logs, setup_logging
+from birdscreen.samsung_tv import get_device_info
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,19 @@ class PosterInfo(BaseModel):
     date: str | None  # ISO date parsed from the filename, if recognisable
     modified: str  # ISO mtime
     size_bytes: int
+
+
+class TvStatus(BaseModel):
+    """Live status for a TV, queried over REST (no pairing popup)."""
+
+    connected: bool
+    name: str | None = None
+    model: str | None = None
+    resolution: str | None = None
+    firmware: str | None = None
+    art_mode: bool = False  # reports Frame/Art-Mode support
+    token_auth: bool = False
+    message: str | None = None
 
 
 def _parse_date(name: str) -> str | None:
@@ -83,6 +97,28 @@ def _thumbnail(name: str) -> Path:
     return thumb
 
 
+def _tv_status(ip: str) -> TvStatus:
+    """Query a TV's REST device info (no pairing popup) and map it to TvStatus."""
+    try:
+        info = get_device_info(ip)
+    except Exception as exc:
+        return TvStatus(connected=False, message=f"Could not reach the TV: {exc}")
+    device = info.get("device", {})
+
+    def truthy(value: object) -> bool:
+        return str(value).lower() == "true"
+
+    return TvStatus(
+        connected=True,
+        name=device.get("name"),
+        model=device.get("modelName"),
+        resolution=device.get("resolution"),
+        firmware=info.get("version") or device.get("firmwareVersion"),
+        art_mode=truthy(device.get("FrameTVSupport")),
+        token_auth=truthy(device.get("TokenAuthSupport")),
+    )
+
+
 def create_app() -> FastAPI:
     setup_logging()
     app = FastAPI(title="BirdScreen", version="0.1.0")
@@ -128,6 +164,21 @@ def create_app() -> FastAPI:
         config.settings = settings
         save_config(config)
         return config.settings
+
+    @app.get("/api/config/tvs")
+    def get_tvs() -> list[TvConfig]:
+        return load_config().tvs
+
+    @app.put("/api/config/tvs")
+    def put_tvs(tvs: list[TvConfig]) -> list[TvConfig]:
+        config = load_config()
+        config.tvs = tvs
+        save_config(config)
+        return config.tvs
+
+    @app.get("/api/tvs/status")
+    def tv_status(ip: str) -> TvStatus:
+        return _tv_status(ip)
 
     if FRONTEND_DIST.is_dir():
         app.mount("/", StaticFiles(directory=FRONTEND_DIST, html=True), name="frontend")

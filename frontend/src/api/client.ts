@@ -31,6 +31,23 @@ export interface SettingsConfig {
   use_weather: boolean
 }
 
+export interface TvConfig {
+  name: string
+  ip: string
+  monitor_art_mode: boolean
+}
+
+export interface TvStatus {
+  connected: boolean
+  name: string | null
+  model: string | null
+  resolution: string | null
+  firmware: string | null
+  art_mode: boolean
+  token_auth: boolean
+  message: string | null
+}
+
 async function getJson<T>(url: string): Promise<T> {
   const res = await fetch(url)
   if (!res.ok) {
@@ -62,4 +79,8 @@ export const api = {
   settings: (): Promise<SettingsConfig> => getJson<SettingsConfig>('/api/config/settings'),
   saveSettings: (config: SettingsConfig): Promise<SettingsConfig> =>
     putJson<SettingsConfig>('/api/config/settings', config),
+  tvs: (): Promise<TvConfig[]> => getJson<TvConfig[]>('/api/config/tvs'),
+  saveTvs: (tvs: TvConfig[]): Promise<TvConfig[]> => putJson<TvConfig[]>('/api/config/tvs', tvs),
+  tvStatus: (ip: string): Promise<TvStatus> =>
+    getJson<TvStatus>(`/api/tvs/status?ip=${encodeURIComponent(ip)}`),
 }
