@@ -11,6 +11,7 @@ dependencies = [
     "google-genai>=2.10.0",
     "pillow>=12.2.0",
     "python-dotenv>=1.2.2",
+    "pyyaml>=6.0.3",
     "samsungtvws>=3.0.5",
 ]
 
@@ -27,7 +28,55 @@ upscale = "birdscreen.upscale:main"
 upscale = [
     "spandrel>=0.4.2",
 ]
+web = [
+    "fastapi>=0.138.1",
+    "uvicorn[standard]>=0.49.0",
+]
 
 [build-system]
 requires = ["uv_build>=0.10.2,<0.11.0"]
 build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "mypy>=2.1.0",
+    "pre-commit>=4.6.0",
+    "pytest>=9.1.1",
+    "ruff>=0.15.20",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+src = ["src"]
+
+[tool.ruff.lint]
+# Strict: correctness (pyflakes/pycodestyle/bugbear), imports, naming, modern
+# syntax, comprehensions, simplify, returns, pathlib, security/quality (TRY,
+# PL), unused args, and ruff's own checks. No grandfather opt-outs.
+select = [
+    "E", "W", "F", "I", "N", "UP", "B", "C4", "SIM", "RET", "PTH", "A",
+    "PIE", "TID", "ARG", "TRY", "PL", "RUF",
+]
+ignore = [
+    "RUF001", "RUF002", "RUF003",  # intentional unicode (°, —, Norwegian chars)
+    "TRY003",  # message literals in raise() — avoids boilerplate exception classes for CLI errors
+]
+
+# Deliberate project complexity standards (not grandfathering — ruff's 5/12
+# defaults are arbitrary; these are the agreed ceilings).
+[tool.ruff.lint.pylint]
+max-args = 8
+max-branches = 15
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["PLR2004"]  # magic values are normal in test fixtures/assertions
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.13"
+files = ["src"]
+strict = true
+ignore_missing_imports = true  # our deps (samsungtvws, spandrel, torch, …) ship no stubs

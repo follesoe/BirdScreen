@@ -19,6 +19,7 @@ from google.genai import types
 from pydantic import BaseModel
 
 from birdscreen.gemini import get_client
+from birdscreen.usage import Usage, usage_from_response
 
 # Cheap/fast text model for the environment description. Override via env.
 SEASON_MODEL = os.environ.get("BIRDSCREEN_TEXT_MODEL", "gemini-2.5-flash")
@@ -60,7 +61,7 @@ def _clean(text: str, *, drop_lead: bool = False) -> str:
     if drop_lead:
         for lead in ("it is ", "it's ", "currently ", "the season is ", "the "):
             if cleaned.lower().startswith(lead):
-                cleaned = cleaned[len(lead):]
+                cleaned = cleaned[len(lead) :]
                 break
     return cleaned.rstrip(" .").strip()
 
@@ -73,7 +74,7 @@ def describe_environment_llm(
     *,
     client: genai.Client | None = None,
     model: str = SEASON_MODEL,
-    usage_sink: list | None = None,
+    usage_sink: list[Usage] | None = None,
 ) -> SeasonInfo:
     """Ask Gemini for a structured environment description. Raises on failure."""
     client = client or get_client()
@@ -86,13 +87,11 @@ def describe_environment_llm(
         ),
     )
     if usage_sink is not None:
-        from birdscreen.usage import usage_from_response
-
         usage_sink.append(usage_from_response(model, response))
 
     info = response.parsed
     if not isinstance(info, SeasonInfo):
-        raise RuntimeError("season model returned no structured data")
+        raise TypeError("season model returned no structured data")
     info.season = _clean(info.season, drop_lead=True)
     info.foliage = _clean(info.foliage)
     info.scenery = _clean(info.scenery)

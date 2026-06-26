@@ -62,25 +62,24 @@ class Weather:
         return phrase
 
 
+# (keywords, condition), checked in order; anything unmatched is "clear".
+_SYMBOL_CONDITIONS: list[tuple[tuple[str, ...], str]] = [
+    (("thunder",), "thunder"),
+    (("sleet",), "sleet"),
+    (("snow",), "snow"),
+    (("rain", "showers"), "rain"),
+    (("fog",), "fog"),
+    (("partlycloudy", "fair"), "partly_cloudy"),
+    (("cloudy",), "cloudy"),
+]
+
+
 def normalize_symbol(symbol_code: str) -> str:
     """Map a MET symbol code (e.g. 'lightrainshowers_day') to a condition."""
     s = symbol_code.lower()
-    if "thunder" in s:
-        return "thunder"
-    if "sleet" in s:
-        return "sleet"
-    if "snow" in s:
-        return "snow"
-    if "rain" in s or "showers" in s:
-        return "rain"
-    if "fog" in s:
-        return "fog"
-    if "partlycloudy" in s or "fair" in s:
-        return "partly_cloudy"
-    if "cloudy" in s:
-        return "cloudy"
-    if "clearsky" in s or "clear" in s:
-        return "clear"
+    for keywords, condition in _SYMBOL_CONDITIONS:
+        if any(k in s for k in keywords):
+            return condition
     return "clear"
 
 

@@ -25,22 +25,20 @@ def reverse_geocode(
     ``language`` is an ISO code or comma list for Nominatim's ``accept-language``
     (defaults to English for clean, prompt-friendly names).
     """
+    params: dict[str, str | float] = {
+        "format": "jsonv2",
+        "lat": round(lat, 5),
+        "lon": round(lon, 5),
+        "zoom": 12,  # city/town level
+        "accept-language": language,
+    }
     try:
         resp = requests.get(
-            NOMINATIM_URL,
-            params={
-                "format": "jsonv2",
-                "lat": round(lat, 5),
-                "lon": round(lon, 5),
-                "zoom": 12,  # city/town level
-                "accept-language": language,
-            },
-            headers={"User-Agent": USER_AGENT},
-            timeout=timeout,
+            NOMINATIM_URL, params=params, headers={"User-Agent": USER_AGENT}, timeout=timeout
         )
         resp.raise_for_status()
         data = resp.json()
-    except Exception:
+    except requests.RequestException:
         return None
 
     address = data.get("address", {})
@@ -49,5 +47,6 @@ def reverse_geocode(
     if place and country:
         return f"{place}, {country}"
     if place:
-        return place
-    return data.get("display_name") or None
+        return str(place)
+    display_name = data.get("display_name")
+    return display_name if isinstance(display_name, str) else None

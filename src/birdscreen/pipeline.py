@@ -1,15 +1,12 @@
 """End-to-end BirdScreen pipeline.
 
-From coordinates + time + a list of birds, build the dynamic prompt, generate the
-poster image with Gemini, downscale it to the TV's native resolution, and
-optionally upload it to a Frame TV.
-
-    uv run make-poster --lat 63.446827 --lon 10.421906 \
-        --bird "Pica pica=Skjære" --bird "Apus apus=Tårnseiler"
-    # ...add --tv 192.168.1.219 --token-file .tv-token-219 to push to the 55".
+From a :class:`~birdscreen.poster.PosterRequest`, build the dynamic prompt,
+generate the poster image with Gemini, normalise it to the TV's native
+resolution (downscale, upscale, or leave as-is), optionally composite our own
+labels, and optionally upload it to a Frame TV.
 
 Posters are written to ``posters/`` with a lexically-sortable, descriptive name:
-``<date>T<time>_<location>_<species...>.jpg`` (date first so files sort by time).
+``<date>T<time>_<location>_<species...>_<model>_NN.jpg``.
 """
 
 from __future__ import annotations
@@ -18,22 +15,53 @@ import argparse
 import re
 import sys
 import unicodedata
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+from PIL import Image
+
 from birdscreen.gemini import DEFAULT_IMAGE_MODEL, generate_image
 from birdscreen.images import prepare_for_frame
+from birdscreen.labels import compose_poster
 from birdscreen.poster import (
-    Bird,
     DEFAULT_LANGUAGE,
+    DEFAULT_OUT_DIR,
     DEFAULT_TITLE,
-    _parse_bird,
+    Bird,
+    PosterContext,
+    PosterRequest,
     aspect_ratio,
     build_daily_prompt,
     image_size_tier,
+    parse_bird,
+    parse_size,
 )
+from birdscreen.samsung_tv import upload_image
+from birdscreen.season import SeasonInfo
+from birdscreen.usage import Usage, summarize
+from birdscreen.weather import Weather
 
-DEFAULT_OUT_DIR = "posters"
+_WEATHER_CONDITIONS = [
+    "clear",
+    "partly_cloudy",
+    "cloudy",
+    "fog",
+    "rain",
+    "sleet",
+    "snow",
+    "thunder",
+]
+
+
+@dataclass
+class RenderResult:
+    """The output of a poster render."""
+
+    image_path: Path
+    prompt: str
+    context: PosterContext
+    environment: SeasonInfo
 
 
 def _slug(text: str) -> str:
@@ -47,10 +75,7 @@ def _slug(text: str) -> str:
 def default_filename(
     when: datetime, location_name: str | None, birds: list[Bird], model: str
 ) -> str:
-    """Date-first, sortable stem (no counter / extension):
-
-    2026-02-15T1200_Trondheim-Norway_Dompap-Blameis-..._gemini-3-pro-image
-    """
+    """Date-first, sortable stem: 2026-02-15T1200_Trondheim-Norway_...gemini-3-pro-image."""
     date = when.strftime("%Y-%m-%dT%H%M")
     location = _slug(location_name or "unknown") or "unknown"
     species = "-".join(_slug(b.common or b.scientific) for b in birds)
@@ -65,97 +90,85 @@ def _next_indexed_base(directory: Path, stem: str) -> Path:
     return directory / f"{stem}_{n:02d}"
 
 
-def make_poster(
-    latitude: float,
-    longitude: float,
-    when: datetime,
-    birds: list[Bird],
-    *,
-    language: str = DEFAULT_LANGUAGE,
-    title: str = DEFAULT_TITLE,
-    labels: bool = True,
-    width: int = 3840,
-    height: int = 2160,
-    model: str = DEFAULT_IMAGE_MODEL,
-    image_size: str | None = None,
-    scale: bool = True,
-    upscale: str | None = None,
-    out: str | Path | None = None,
-    out_dir: str | Path = DEFAULT_OUT_DIR,
-    location_name: str | None = None,
-    weather=None,
-    fetch_weather: bool = True,
-    usage_sink: list | None = None,
-):
-    """Build the prompt, generate the image, and save it.
-
-    Returns (image_path, prompt, ctx, env). ``image_size`` overrides the Gemini
-    size tier (else derived from ``width``x``height``). With ``scale=True`` the
-    image is downscaled to exactly ``width``x``height`` (TV native); with
-    ``scale=False`` Gemini's actual output is saved as-is.
-    """
-    prompt, ctx, env = build_daily_prompt(
-        latitude, longitude, when, birds,
-        language=language, title=title, labels=labels, width=width, height=height,
-        location_name=location_name, weather=weather,
-        fetch_weather=fetch_weather, usage_sink=usage_sink,
-    )
-
-    if out is not None:
-        base = Path(out).with_suffix("")
+def _output_base(request: PosterRequest, location_name: str | None) -> Path:
+    """Where to write this render (explicit ``out`` path, or auto-named in ``out_dir``)."""
+    if request.out is not None:
+        base = Path(request.out).with_suffix("")
         base.parent.mkdir(parents=True, exist_ok=True)
-    else:
-        directory = Path(out_dir)
-        directory.mkdir(parents=True, exist_ok=True)
-        base = _next_indexed_base(directory, default_filename(when, ctx.location_name, birds, model))
+        return base
+    directory = Path(request.out_dir)
+    directory.mkdir(parents=True, exist_ok=True)
+    stem = default_filename(request.when, location_name, request.birds, request.model)
+    return _next_indexed_base(directory, stem)
+
+
+def _finalize_image(request: PosterRequest, base: Path, raw: Path, orig_ext: str) -> Path:
+    """Turn the raw Gemini render into the final image (upscale / downscale / as-is)."""
+    size = (request.width, request.height)
+    explicit = Path(request.out) if request.out is not None else None
+
+    if request.upscale:
+        # Keep the raw render as the "original", then AI-upscale to native size.
+        original = base.with_suffix(orig_ext)
+        raw.replace(original)
+        from birdscreen.upscale import super_resolve  # noqa: PLC0415 — optional torch dep
+
+        sr_tmp = base.with_suffix(".srtmp.png")
+        super_resolve(original, model=request.upscale).save(sr_tmp)
+        final = base.with_name(f"{base.name}_upscaled-{_slug(request.upscale)}").with_suffix(".jpg")
+        prepare_for_frame(sr_tmp, dst=final, size=size)
+        sr_tmp.unlink(missing_ok=True)
+        return final
+
+    if request.scale:
+        final = explicit or base.with_suffix(".jpg")
+        prepare_for_frame(raw, dst=final, size=size)
+        raw.unlink(missing_ok=True)
+        return final
+
+    final = explicit or base.with_suffix(orig_ext)
+    raw.replace(final)
+    return final
+
+
+def make_poster(
+    request: PosterRequest,
+    *,
+    weather: Weather | None = None,
+    usage_sink: list[Usage] | None = None,
+) -> RenderResult:
+    """Build the prompt, generate the image, normalise it, and save it."""
+    prompt, ctx, env = build_daily_prompt(request, weather=weather, usage_sink=usage_sink)
+    size = (request.width, request.height)
+
+    base = _output_base(request, ctx.location_name)
     base.with_suffix(".txt").write_text(prompt, encoding="utf-8")  # prompt alongside
 
-    tier = image_size or image_size_tier(width, height)
     raw = base.with_suffix(".raw")
     generate_image(
-        prompt, raw, model=model,
-        aspect_ratio=aspect_ratio(width, height),
-        image_size=tier,
+        prompt,
+        raw,
+        model=request.model,
+        aspect_ratio=aspect_ratio(*size),
+        image_size=request.image_size or image_size_tier(*size),
         usage_sink=usage_sink,
     )
-
-    from PIL import Image
 
     with Image.open(raw) as im:
         fmt = (im.format or "PNG").lower()
     orig_ext = ".jpg" if fmt in ("jpeg", "jpg") else f".{fmt}"
 
-    if upscale:
-        # Keep Gemini's raw output as the "original", then AI-upscale to native.
-        original = base.with_suffix(orig_ext)
-        raw.replace(original)
-        from birdscreen.upscale import super_resolve
-
-        sr = super_resolve(original, model=upscale)
-        sr_tmp = base.with_suffix(".srtmp.png")
-        sr.save(sr_tmp)
-        final = base.with_name(f"{base.name}_upscaled-{_slug(upscale)}").with_suffix(".jpg")
-        prepare_for_frame(sr_tmp, dst=final, size=(width, height))
-        sr_tmp.unlink(missing_ok=True)
-    elif scale:
-        # Downscale to the exact native panel size.
-        final = Path(out) if out is not None else base.with_suffix(".jpg")
-        prepare_for_frame(raw, dst=final, size=(width, height))
-        raw.unlink(missing_ok=True)
-    else:
-        final = Path(out) if out is not None else base.with_suffix(orig_ext)
-        raw.replace(final)
-
-    # If the model painted no text (labels=False), composite our own title + labels.
-    if not labels:
-        from birdscreen.labels import compose_poster
-
+    final = _finalize_image(request, base, raw, orig_ext)
+    if not request.labels:
         labeled = final.with_name(f"{final.stem}_labeled.jpg")
-        final = compose_poster(final, labeled, title=title, birds=birds, size=(width, height))
-    return final, prompt, ctx, env
+        final = compose_poster(final, labeled, title=request.title, birds=request.birds, size=size)
+    return RenderResult(final, prompt, ctx, env)
 
 
-def main() -> None:
+# --------------------------------------------------------------------------- CLI
+
+
+def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="make-poster",
         description="End-to-end: coordinates + birds -> poster image (-> optional TV).",
@@ -164,103 +177,144 @@ def main() -> None:
     parser.add_argument("--lon", type=float, required=True)
     parser.add_argument("--when", help="Local date/time ISO 8601. Default: now.")
     parser.add_argument(
-        "--bird", action="append", default=[], metavar="SCI[=COMMON]",
+        "--bird",
+        action="append",
+        default=[],
+        metavar="SCI[=COMMON]",
         help="A bird, repeatable. e.g. --bird 'Pica pica=Skjære'",
     )
     parser.add_argument("--language", default=DEFAULT_LANGUAGE)
     parser.add_argument("--title", default=DEFAULT_TITLE)
-    parser.add_argument("--no-labels", action="store_true",
-                        help="Have the model paint no text; composite the title + species labels ourselves.")
-    parser.add_argument("--size", default="3840x2160", help="Native pixel size WxH (aspect + downscale target).")
-    parser.add_argument("--image-size", choices=["512", "1K", "2K", "4K"],
-                        help="Gemini render tier (default derived from --size).")
-    parser.add_argument("--no-scale", action="store_true",
-                        help="Save Gemini's actual output (no downscale to native).")
-    parser.add_argument("--upscale", action="store_true",
-                        help="AI-upscale to native res with Real-ESRGAN (needs the 'upscale' extra).")
-    parser.add_argument("--upscale-model", default="realesrgan-x4plus",
-                        help="Upscaler model (realesrgan-x4plus | realesrgan-x4plus-anime).")
+    parser.add_argument(
+        "--no-labels",
+        action="store_true",
+        help="Have the model paint no text; composite the title + species labels ourselves.",
+    )
+    parser.add_argument("--size", default="3840x2160", help="Native pixel size WxH.")
+    parser.add_argument(
+        "--image-size",
+        choices=["512", "1K", "2K", "4K"],
+        help="Gemini render tier (default derived from --size).",
+    )
+    parser.add_argument(
+        "--no-scale", action="store_true", help="Save Gemini's actual output (no downscale)."
+    )
+    parser.add_argument(
+        "--upscale",
+        action="store_true",
+        help="AI-upscale to native res with Real-ESRGAN (needs the 'upscale' extra).",
+    )
+    parser.add_argument("--upscale-model", default="realesrgan-x4plus", help="Upscaler model.")
     parser.add_argument("--model", default=DEFAULT_IMAGE_MODEL)
     parser.add_argument("--location", help="Override reverse-geocoded place name.")
     parser.add_argument("--no-weather", action="store_true")
     parser.add_argument(
         "--weather-condition",
-        choices=["clear", "partly_cloudy", "cloudy", "fog", "rain", "sleet", "snow", "thunder"],
+        choices=_WEATHER_CONDITIONS,
         help="Override the weather instead of fetching from yr.no.",
     )
     parser.add_argument("--weather-temp", type=float, help="Override temperature in °C.")
-    parser.add_argument("--weather-intensity", choices=["light", "moderate", "heavy"],
-                        help="Precipitation intensity for the weather override.")
-    parser.add_argument("-o", "--out", help="Explicit output path (default: auto-named in posters/).")
-    parser.add_argument("--out-dir", default=DEFAULT_OUT_DIR, help="Directory for auto-named posters.")
+    parser.add_argument(
+        "--weather-intensity",
+        choices=["light", "moderate", "heavy"],
+        help="Precipitation intensity for the weather override.",
+    )
+    parser.add_argument("-o", "--out", help="Explicit output path (default: auto-named).")
+    parser.add_argument(
+        "--out-dir", default=DEFAULT_OUT_DIR, help="Directory for auto-named posters."
+    )
     parser.add_argument("--tv", help="TV IP to upload+display the poster on (optional).")
     parser.add_argument("--token-file", default=".tv-token", help="TV auth token file.")
+    return parser
+
+
+def _request_from_args(
+    args: argparse.Namespace, when: datetime, size: tuple[int, int]
+) -> PosterRequest:
+    return PosterRequest(
+        latitude=args.lat,
+        longitude=args.lon,
+        when=when,
+        birds=[parse_bird(b) for b in args.bird],
+        location_name=args.location,
+        language=args.language,
+        title=args.title,
+        labels=not args.no_labels,
+        width=size[0],
+        height=size[1],
+        model=args.model,
+        image_size=args.image_size,
+        scale=not args.no_scale,
+        upscale=(args.upscale_model if args.upscale else None),
+        fetch_weather=not args.no_weather,
+        out=args.out,
+        out_dir=args.out_dir,
+    )
+
+
+def _report(result: RenderResult, usage: list[Usage]) -> None:
+    with Image.open(result.image_path) as im:
+        actual_w, actual_h = im.size
+    weather = result.context.weather
+    print(f"      location: {result.context.location_name} | season: {result.environment.season}")
+    print(f"      weather:  {weather.describe() if weather else '(skipped)'}")
+    print(
+        f"✓ Image:  {result.image_path} "
+        f"({result.image_path.stat().st_size} bytes, {actual_w}x{actual_h})"
+    )
+    print(f"  Prompt: {result.image_path.with_suffix('.txt')}")
+    print("Token usage / estimated cost:")
+    print(summarize(usage))
+
+
+def main() -> None:
+    parser = _build_parser()
     args = parser.parse_args()
 
     when = datetime.fromisoformat(args.when) if args.when else datetime.now()
     try:
-        width, height = (int(x) for x in args.size.lower().split("x"))
+        size = parse_size(args.size)
     except ValueError:
         parser.error("--size must look like 3840x2160")
     if not args.bird:
         parser.error("provide at least one --bird")
-    birds = [_parse_bird(b) for b in args.bird]
 
-    from birdscreen.usage import Usage, summarize
-
-    weather = None
-    if args.weather_condition:
-        from birdscreen.weather import Weather
-
-        weather = Weather(
+    weather = (
+        Weather(
             condition=args.weather_condition,
             intensity=args.weather_intensity,
             temperature_c=args.weather_temp,
         )
+        if args.weather_condition
+        else None
+    )
+    request = _request_from_args(args, when, size)
 
-    tier = args.image_size or image_size_tier(width, height)
-    if args.upscale:
-        finishing = f"upscale to {width}x{height} ({args.upscale_model})"
-    elif args.no_scale:
-        finishing = "no scaling"
-    else:
-        finishing = f"downscale to {width}x{height}"
+    tier = request.image_size or image_size_tier(*size)
+    finishing = (
+        f"upscale to {size[0]}x{size[1]} ({args.upscale_model})"
+        if args.upscale
+        else ("no scaling" if args.no_scale else f"downscale to {size[0]}x{size[1]}")
+    )
+    print(
+        f"[1/3] Building prompt (aspect {aspect_ratio(*size)}, render tier {tier}, {finishing})..."
+    )
+    print(f"[2/3] Generating image with {request.model} (this can take a while)...")
+
     usage: list[Usage] = []
-    print(f"[1/3] Building prompt (aspect {aspect_ratio(width, height)}, render tier {tier}, {finishing})...")
-    print(f"[2/3] Generating image with {args.model} (this can take a while)...")
     try:
-        image_path, prompt, ctx, env = make_poster(
-            args.lat, args.lon, when, birds,
-            language=args.language, title=args.title, labels=not args.no_labels,
-            width=width, height=height, model=args.model,
-            image_size=args.image_size, scale=not args.no_scale,
-            upscale=(args.upscale_model if args.upscale else None),
-            out=args.out, out_dir=args.out_dir, location_name=args.location,
-            weather=weather, fetch_weather=not args.no_weather, usage_sink=usage,
-        )
-    except Exception as exc:
+        result = make_poster(request, weather=weather, usage_sink=usage)
+    except Exception as exc:  # CLI boundary: report and exit
         print(f"✗ Failed: {type(exc).__name__}: {exc}")
         sys.exit(1)
-
-    from PIL import Image
-
-    with Image.open(image_path) as _im:
-        actual_w, actual_h = _im.size
-    print(f"      location: {ctx.location_name} | season: {env.season}")
-    print(f"      weather:  {ctx.weather.describe() if ctx.weather else '(skipped)'}")
-    print(f"✓ Image:  {image_path} ({image_path.stat().st_size} bytes, {actual_w}x{actual_h})")
-    print(f"  Prompt: {image_path.with_suffix('.txt')}")
-    print("Token usage / estimated cost:")
-    print(summarize(usage))
+    _report(result, usage)
 
     if args.tv:
-        from birdscreen.samsung_tv import upload_image
-
         print(f"[3/3] Uploading to TV {args.tv} (accept the popup if shown)...")
         try:
-            content_id = upload_image(args.tv, image_path, token_file=args.token_file)
+            content_id = upload_image(args.tv, result.image_path, token_file=args.token_file)
             print(f"✓ Uploaded + displayed on {args.tv}: {content_id}")
-        except Exception as exc:
+        except Exception as exc:  # CLI boundary: report and exit
             print(f"✗ TV upload failed: {type(exc).__name__}: {exc}")
             sys.exit(2)
 

@@ -25,6 +25,7 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import socket
@@ -32,16 +33,14 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import urllib3
 from samsungtvws import SamsungTVWS, exceptions
+
+from birdscreen.images import prepare_for_frame
 
 # The Frame uses a self-signed cert on its secure websocket/REST endpoint;
 # silence the noisy "InsecureRequestWarning" that results.
-try:
-    import urllib3
-
-    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-except Exception:  # pragma: no cover - urllib3 always present via requests
-    pass
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # Secure websocket port used by The Frame for the Art API.
 ART_WS_PORT = 8002
@@ -85,7 +84,7 @@ def discover(timeout: float = 3.0) -> list[str]:
             while True:
                 try:
                     _data, addr = sock.recvfrom(2048)
-                except socket.timeout:
+                except TimeoutError:
                     break
                 found.add(addr[0])
         finally:
@@ -111,10 +110,8 @@ def check_art_websocket(host: str, token_file: str) -> dict[str, Any]:
     Triggers the TV "Allow" popup on first use. Returns a dict with the Art API
     version and the currently displayed artwork id.
     """
-    tv = SamsungTVWS(
-        host=host, port=ART_WS_PORT, token_file=token_file, name=CLIENT_NAME
-    )
-    art = tv.art()
+    tv = SamsungTVWS(host=host, port=ART_WS_PORT, token_file=token_file, name=CLIENT_NAME)
+    art: Any = tv.art()
     result = {"api_version": art.get_api_version()}
     try:
         result["current"] = art.get_current()
@@ -140,6 +137,38 @@ def _print_device_summary(info: dict[str, Any]) -> None:
     for label, value in rows:
         if value is not None:
             print(f"  {label:<{width}} : {value}")
+
+
+def _check_art_ws(host: str, token_file: str, *, as_json: bool, result: dict[str, Any]) -> bool:
+    """Run the Art-websocket check, populate ``result``, return True on success."""
+    if not as_json:
+        print(
+            f"\nConnecting over the Art websocket (port {ART_WS_PORT})...\n"
+            "→ Accept the 'Allow' popup on the TV if it appears."
+        )
+    try:
+        art = check_art_websocket(host, token_file)
+    except Exception as exc:  # report and signal failure to the caller
+        result["art_error"] = str(exc)
+        if not as_json:
+            print(f"✗ Art websocket failed: {exc}")
+            print("  If a popup appeared on the TV, accept it and re-run.")
+        return False
+
+    result["art"] = art
+    if not as_json:
+        print(f"✓ Art API version: {art.get('api_version')}")
+        if "current" in art:
+            print(f"  Current artwork: {art['current']}")
+        token = Path(token_file)
+        if token.exists() and token.stat().st_size > 0:
+            print(f"  Auth token cached in: {token_file}")
+        else:
+            print(
+                "  Note: TV did not persist an auth token; the Allow popup "
+                "may reappear on future connections."
+            )
+    return True
 
 
 def check_connection(host: str, *, token_file: str, do_art_ws: bool, as_json: bool) -> int:
@@ -171,39 +200,13 @@ def check_connection(host: str, *, token_file: str, do_art_ws: bool, as_json: bo
             print("✗ This TV does not report Frame/Art-Mode support.")
 
     # 2) Optional Art websocket check ----------------------------------------
-    if do_art_ws:
-        if not as_json:
-            print(
-                "\nConnecting over the Art websocket "
-                f"(port {ART_WS_PORT})...\n"
-                "→ Accept the 'Allow' popup on the TV if it appears."
-            )
-        try:
-            art = check_art_websocket(host, token_file)
-            result["art"] = art
-            if not as_json:
-                print(f"✓ Art API version: {art.get('api_version')}")
-                if "current" in art:
-                    print(f"  Current artwork: {art['current']}")
-                if os.path.exists(token_file) and os.path.getsize(token_file) > 0:
-                    print(f"  Auth token cached in: {token_file}")
-                else:
-                    print(
-                        "  Note: TV did not persist an auth token; the Allow popup "
-                        "may reappear on future connections."
-                    )
-        except Exception as exc:
-            result["art_error"] = str(exc)
-            if not as_json:
-                print(f"✗ Art websocket failed: {exc}")
-                print("  If a popup appeared on the TV, accept it and re-run.")
-            if as_json:
-                print(json.dumps(result, indent=2, default=str))
-            return 2
+    if do_art_ws and not _check_art_ws(host, token_file, as_json=as_json, result=result):
+        if as_json:
+            print(json.dumps(result, indent=2, default=str))
+        return 2
 
     if as_json:
         print(json.dumps(result, indent=2, default=str))
-
     return 0 if is_frame else 3
 
 
@@ -236,10 +239,8 @@ def upload_image(
     Returns the ``content_id`` assigned by the TV. Connecting may trigger the
     TV's "Allow" popup if the device is not already paired (token cached).
     """
-    tv = SamsungTVWS(
-        host=host, port=ART_WS_PORT, token_file=token_file, name=CLIENT_NAME
-    )
-    art = tv.art()
+    tv = SamsungTVWS(host=host, port=ART_WS_PORT, token_file=token_file, name=CLIENT_NAME)
+    art: Any = tv.art()
     data = Path(image_path).read_bytes()
     try:
         content_id = art.upload(data, file_type=file_type, matte=matte)
@@ -251,13 +252,11 @@ def upload_image(
     if show:
         art.select_image(content_id, show=True)
     if art_mode:
-        try:
+        # Not fatal: the image is uploaded and selected; the TV may just not switch
+        # into Art Mode (e.g. it is currently powered on a TV input).
+        with contextlib.suppress(Exception):
             art.set_artmode(True)
-        except Exception:
-            # Not fatal: the image is uploaded and selected; the TV just may not
-            # have switched into Art Mode (e.g. it is currently powered on TV input).
-            pass
-    return content_id
+    return str(content_id)
 
 
 def upload_main() -> None:
@@ -272,9 +271,7 @@ def upload_main() -> None:
         default=DEFAULT_TOKEN_FILE,
         help=f"Path to the TV auth token (default: {DEFAULT_TOKEN_FILE}).",
     )
-    parser.add_argument(
-        "--matte", default="none", help="Frame matte style (default: none)."
-    )
+    parser.add_argument("--matte", default="none", help="Frame matte style (default: none).")
     parser.add_argument(
         "--no-prepare",
         action="store_true",
@@ -295,16 +292,12 @@ def upload_main() -> None:
         file_type = upload_path.suffix.lstrip(".").lower() or "jpg"
         print(f"Uploading {upload_path} as-is ({file_type}).")
     else:
-        from birdscreen.images import prepare_for_frame
-
         out = Path("cache") / f"{Path(args.image).stem}-frame.jpg"
         upload_path = prepare_for_frame(args.image, dst=out)
         file_type = "jpg"
         print(f"Prepared Frame-ready JPEG: {upload_path}")
 
-    print(
-        f"Uploading to {args.host} (accept the TV popup if it appears)..."
-    )
+    print(f"Uploading to {args.host} (accept the TV popup if it appears)...")
     try:
         content_id = upload_image(
             args.host,
@@ -362,7 +355,7 @@ def main() -> None:
             print("Found candidate device(s):")
             for ip in hosts:
                 print(f"  {ip}")
-            print('\nRe-run with the IP, e.g.:  uv run check-tv <ip>')
+            print("\nRe-run with the IP, e.g.:  uv run check-tv <ip>")
         else:
             print("No devices responded. The TV may be off or not on this network.")
         sys.exit(0 if hosts else 1)

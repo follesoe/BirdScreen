@@ -21,24 +21,16 @@ import os
 import sys
 import time
 from pathlib import Path
+from typing import cast
 
+from dotenv import find_dotenv, load_dotenv
 from google import genai
 from google.genai import errors, types
 
+from birdscreen.usage import Usage, summarize, usage_from_response
 
-def _is_transient(exc: Exception) -> bool:
-    """True for retryable API errors (rate limits / server spikes)."""
-    code = getattr(exc, "code", None)
-    return isinstance(exc, errors.ServerError) or code in (429, 500, 502, 503, 504)
-
-try:  # load .env if present (no error if python-dotenv missing or no file)
-    from dotenv import find_dotenv, load_dotenv
-
-    # Search upward from the current working directory so a project-root .env is
-    # found even when this module is imported from an installed location.
-    load_dotenv(find_dotenv(usecwd=True))
-except Exception:  # pragma: no cover
-    pass
+# Search upward from CWD so a project-root .env is found even when installed.
+load_dotenv(find_dotenv(usecwd=True))
 
 # Nano Banana Pro — best text rendering / complex layouts. Override with the
 # BIRDSCREEN_IMAGE_MODEL env var or the --model flag.
@@ -46,15 +38,20 @@ DEFAULT_IMAGE_MODEL = os.environ.get("BIRDSCREEN_IMAGE_MODEL", "gemini-3-pro-ima
 # The Frame is a 4K 16:9 panel; 2K is a good cost/quality default for iteration.
 DEFAULT_ASPECT_RATIO = "16:9"
 DEFAULT_IMAGE_SIZE = "2K"
+_RETRYABLE_CODES = (429, 500, 502, 503, 504)
+_MAX_RETRIES = 4
+_RETRY_DELAY = 8.0
+
+
+def _is_transient(exc: Exception) -> bool:
+    """True for retryable API errors (rate limits / server spikes)."""
+    code = getattr(exc, "code", None)
+    return isinstance(exc, errors.ServerError) or code in _RETRYABLE_CODES
 
 
 def get_client(api_key: str | None = None) -> genai.Client:
     """Create a Gemini client, reading GEMINI_API_KEY/GOOGLE_API_KEY if needed."""
-    key = (
-        api_key
-        or os.environ.get("GEMINI_API_KEY")
-        or os.environ.get("GOOGLE_API_KEY")
-    )
+    key = api_key or os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
     if not key:
         raise RuntimeError(
             "No Gemini API key found. Set GEMINI_API_KEY (e.g. in a .env file).\n"
@@ -66,10 +63,10 @@ def get_client(api_key: str | None = None) -> genai.Client:
 def _extract_image_bytes(response: types.GenerateContentResponse) -> bytes | None:
     for candidate in response.candidates or []:
         content = getattr(candidate, "content", None)
-        for part in (getattr(content, "parts", None) or []):
+        for part in getattr(content, "parts", None) or []:
             inline = getattr(part, "inline_data", None)
             if inline is not None and inline.data:
-                return inline.data
+                return cast("bytes", inline.data)
     return None
 
 
@@ -77,7 +74,7 @@ def _extract_text(response: types.GenerateContentResponse) -> str:
     chunks: list[str] = []
     for candidate in response.candidates or []:
         content = getattr(candidate, "content", None)
-        for part in (getattr(content, "parts", None) or []):
+        for part in getattr(content, "parts", None) or []:
             if getattr(part, "text", None):
                 chunks.append(part.text)
     return "\n".join(chunks)
@@ -91,9 +88,7 @@ def generate_image(
     aspect_ratio: str = DEFAULT_ASPECT_RATIO,
     image_size: str = DEFAULT_IMAGE_SIZE,
     client: genai.Client | None = None,
-    max_retries: int = 4,
-    retry_delay: float = 8.0,
-    usage_sink: list | None = None,
+    usage_sink: list[Usage] | None = None,
 ) -> Path:
     """Generate an image from ``prompt`` and write it to ``out_path``.
 
@@ -109,18 +104,16 @@ def generate_image(
             image_size=image_size,
         ),
     )
-    for attempt in range(max_retries):
+    for attempt in range(_MAX_RETRIES):
         try:
-            response = client.models.generate_content(
-                model=model, contents=prompt, config=config
-            )
+            response = client.models.generate_content(model=model, contents=prompt, config=config)
             break
         except Exception as exc:
-            if _is_transient(exc) and attempt < max_retries - 1:
-                wait = retry_delay * (attempt + 1)
+            if _is_transient(exc) and attempt < _MAX_RETRIES - 1:
+                wait = _RETRY_DELAY * (attempt + 1)
                 print(
                     f"  transient error ({getattr(exc, 'code', type(exc).__name__)}); "
-                    f"retrying in {wait:.0f}s [{attempt + 1}/{max_retries - 1}]",
+                    f"retrying in {wait:.0f}s [{attempt + 1}/{_MAX_RETRIES - 1}]",
                     file=sys.stderr,
                 )
                 time.sleep(wait)
@@ -128,15 +121,12 @@ def generate_image(
             raise
 
     if usage_sink is not None:
-        from birdscreen.usage import usage_from_response
-
         usage_sink.append(usage_from_response(model, response))
 
     image_bytes = _extract_image_bytes(response)
     if image_bytes is None:
         raise RuntimeError(
-            "Gemini returned no image. "
-            f"Model text (if any): {_extract_text(response)!r}"
+            f"Gemini returned no image. Model text (if any): {_extract_text(response)!r}"
         )
     out = Path(out_path)
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -164,14 +154,10 @@ def main() -> None:
     parser.add_argument(
         "--prompt-file", help="Read the prompt from a file instead of the argument."
     )
-    parser.add_argument(
-        "-o", "--out", default="cache/poster.png", help="Output image path."
-    )
+    parser.add_argument("-o", "--out", default="cache/poster.png", help="Output image path.")
     parser.add_argument("--model", default=DEFAULT_IMAGE_MODEL, help="Model ID.")
     parser.add_argument("--aspect", default=DEFAULT_ASPECT_RATIO, help="Aspect ratio.")
-    parser.add_argument(
-        "--size", default=DEFAULT_IMAGE_SIZE, help="Image size: 512, 1K, 2K, 4K."
-    )
+    parser.add_argument("--size", default=DEFAULT_IMAGE_SIZE, help="Image size: 512, 1K, 2K, 4K.")
     parser.add_argument(
         "--list-models",
         action="store_true",
@@ -193,8 +179,6 @@ def main() -> None:
         prompt = Path(args.prompt_file).read_text(encoding="utf-8")
     if not prompt:
         parser.error("provide a prompt (positional) or --prompt-file")
-
-    from birdscreen.usage import Usage, summarize
 
     usage: list[Usage] = []
     print(f"Generating with {args.model} ({args.aspect}, {args.size})...")

@@ -8,6 +8,7 @@ etc.).
 from __future__ import annotations
 
 from pathlib import Path
+from typing import cast
 
 from PIL import Image
 
@@ -22,7 +23,7 @@ def _sample_background(img: Image.Image) -> tuple[int, int, int]:
     corners = [(0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1)]
     r = g = b = 0
     for x, y in corners:
-        pr, pg, pb = rgb.getpixel((x, y))
+        pr, pg, pb = cast("tuple[int, int, int]", rgb.getpixel((x, y)))
         r, g, b = r + pr, g + pg, b + pb
     n = len(corners)
     return (r // n, g // n, b // n)
@@ -46,7 +47,7 @@ def prepare_for_frame(
     Returns the path to the written JPEG.
     """
     src = Path(src)
-    img = Image.open(src)
+    img: Image.Image = Image.open(src)
 
     if background is None:
         background = _sample_background(img)
@@ -64,7 +65,7 @@ def prepare_for_frame(
     target_w, target_h = size
     scale = min(target_w / img.width, target_h / img.height)
     new_size = (max(1, round(img.width * scale)), max(1, round(img.height * scale)))
-    img = img.resize(new_size, Image.LANCZOS)
+    img = img.resize(new_size, Image.Resampling.LANCZOS)
 
     # Center on a solid canvas of the exact target size.
     canvas = Image.new("RGB", size, background)
