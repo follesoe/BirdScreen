@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api } from '@/api/client'
+import { PageHeading } from '@/components/PageHeading'
 
 export function Logs() {
   const { t } = useTranslation()
@@ -27,16 +28,19 @@ export function Logs() {
 
   return (
     <section>
-      <div className="mb-4 flex items-center justify-between">
-        <h2 className="font-display text-3xl text-ink">{t('logs.heading')}</h2>
-        <button
-          type="button"
-          onClick={refresh}
-          className="rounded-full border border-bark/40 px-4 py-1 font-body text-ink-soft transition-colors hover:bg-parchment-deep"
-        >
-          {t('logs.refresh')}
-        </button>
-      </div>
+      <PageHeading
+        action={
+          <button
+            type="button"
+            onClick={refresh}
+            className="rounded-full border border-bark/40 px-4 py-1 font-body text-ink-soft transition-colors hover:bg-parchment-deep"
+          >
+            {t('logs.refresh')}
+          </button>
+        }
+      >
+        {t('logs.heading')}
+      </PageHeading>
       {lines.length === 0 ? (
         <p className="text-ink-soft">{t('logs.empty')}</p>
       ) : (

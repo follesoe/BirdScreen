@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api, type PosterInfo } from '@/api/client'
+import { PageHeading } from '@/components/PageHeading'
 
 export function Gallery() {
   const { t } = useTranslation()
@@ -31,7 +32,7 @@ export function Gallery() {
 
   return (
     <section>
-      <h2 className="mb-4 font-display text-2xl text-ink">{t('gallery.heading')}</h2>
+      <PageHeading>{t('gallery.heading')}</PageHeading>
       {posters.length === 0 ? (
         <p className="text-ink-soft">{t('gallery.empty')}</p>
       ) : (
