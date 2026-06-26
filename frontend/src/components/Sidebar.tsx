@@ -28,7 +28,7 @@ export function Sidebar() {
     <aside className="flex w-72 flex-col border-r border-bark/25 bg-parchment-deep">
       <div className="px-4 pt-5 pb-4">
         <img src={logoUrl} alt={t('app.title')} className="w-full" />
-        <div className="-mt-1 text-center">
+        <div className="mt-4 text-center">
           <p className="font-display text-4xl leading-none font-semibold text-ink">
             {t('app.title')}
           </p>
