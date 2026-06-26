@@ -73,11 +73,13 @@ def make_poster(
     *,
     language: str = DEFAULT_LANGUAGE,
     title: str = DEFAULT_TITLE,
+    labels: bool = True,
     width: int = 3840,
     height: int = 2160,
     model: str = DEFAULT_IMAGE_MODEL,
     image_size: str | None = None,
     scale: bool = True,
+    upscale: str | None = None,
     out: str | Path | None = None,
     out_dir: str | Path = DEFAULT_OUT_DIR,
     location_name: str | None = None,
@@ -94,7 +96,7 @@ def make_poster(
     """
     prompt, ctx, env = build_daily_prompt(
         latitude, longitude, when, birds,
-        language=language, title=title, width=width, height=height,
+        language=language, title=title, labels=labels, width=width, height=height,
         location_name=location_name, weather=weather,
         fetch_weather=fetch_weather, usage_sink=usage_sink,
     )
@@ -117,20 +119,39 @@ def make_poster(
         usage_sink=usage_sink,
     )
 
-    if scale:
+    from PIL import Image
+
+    with Image.open(raw) as im:
+        fmt = (im.format or "PNG").lower()
+    orig_ext = ".jpg" if fmt in ("jpeg", "jpg") else f".{fmt}"
+
+    if upscale:
+        # Keep Gemini's raw output as the "original", then AI-upscale to native.
+        original = base.with_suffix(orig_ext)
+        raw.replace(original)
+        from birdscreen.upscale import super_resolve
+
+        sr = super_resolve(original, model=upscale)
+        sr_tmp = base.with_suffix(".srtmp.png")
+        sr.save(sr_tmp)
+        final = base.with_name(f"{base.name}_upscaled-{_slug(upscale)}").with_suffix(".jpg")
+        prepare_for_frame(sr_tmp, dst=final, size=(width, height))
+        sr_tmp.unlink(missing_ok=True)
+    elif scale:
         # Downscale to the exact native panel size.
         final = Path(out) if out is not None else base.with_suffix(".jpg")
         prepare_for_frame(raw, dst=final, size=(width, height))
         raw.unlink(missing_ok=True)
     else:
-        # Keep Gemini's actual output; just give it the right extension.
-        from PIL import Image
-
-        with Image.open(raw) as im:
-            fmt = (im.format or "PNG").lower()
-        ext = ".jpg" if fmt in ("jpeg", "jpg") else f".{fmt}"
-        final = Path(out) if out is not None else base.with_suffix(ext)
+        final = Path(out) if out is not None else base.with_suffix(orig_ext)
         raw.replace(final)
+
+    # If the model painted no text (labels=False), composite our own title + labels.
+    if not labels:
+        from birdscreen.labels import compose_poster
+
+        labeled = final.with_name(f"{final.stem}_labeled.jpg")
+        final = compose_poster(final, labeled, title=title, birds=birds, size=(width, height))
     return final, prompt, ctx, env
 
 
@@ -148,11 +169,17 @@ def main() -> None:
     )
     parser.add_argument("--language", default=DEFAULT_LANGUAGE)
     parser.add_argument("--title", default=DEFAULT_TITLE)
+    parser.add_argument("--no-labels", action="store_true",
+                        help="Have the model paint no text; composite the title + species labels ourselves.")
     parser.add_argument("--size", default="3840x2160", help="Native pixel size WxH (aspect + downscale target).")
     parser.add_argument("--image-size", choices=["512", "1K", "2K", "4K"],
                         help="Gemini render tier (default derived from --size).")
     parser.add_argument("--no-scale", action="store_true",
                         help="Save Gemini's actual output (no downscale to native).")
+    parser.add_argument("--upscale", action="store_true",
+                        help="AI-upscale to native res with Real-ESRGAN (needs the 'upscale' extra).")
+    parser.add_argument("--upscale-model", default="realesrgan-x4plus",
+                        help="Upscaler model (realesrgan-x4plus | realesrgan-x4plus-anime).")
     parser.add_argument("--model", default=DEFAULT_IMAGE_MODEL)
     parser.add_argument("--location", help="Override reverse-geocoded place name.")
     parser.add_argument("--no-weather", action="store_true")
@@ -192,16 +219,22 @@ def main() -> None:
         )
 
     tier = args.image_size or image_size_tier(width, height)
+    if args.upscale:
+        finishing = f"upscale to {width}x{height} ({args.upscale_model})"
+    elif args.no_scale:
+        finishing = "no scaling"
+    else:
+        finishing = f"downscale to {width}x{height}"
     usage: list[Usage] = []
-    print(f"[1/3] Building prompt (aspect {aspect_ratio(width, height)}, render tier {tier}, "
-          f"{'no scaling' if args.no_scale else f'downscale to {width}x{height}'})...")
+    print(f"[1/3] Building prompt (aspect {aspect_ratio(width, height)}, render tier {tier}, {finishing})...")
     print(f"[2/3] Generating image with {args.model} (this can take a while)...")
     try:
         image_path, prompt, ctx, env = make_poster(
             args.lat, args.lon, when, birds,
-            language=args.language, title=args.title,
+            language=args.language, title=args.title, labels=not args.no_labels,
             width=width, height=height, model=args.model,
             image_size=args.image_size, scale=not args.no_scale,
+            upscale=(args.upscale_model if args.upscale else None),
             out=args.out, out_dir=args.out_dir, location_name=args.location,
             weather=weather, fetch_weather=not args.no_weather, usage_sink=usage,
         )

@@ -21,6 +21,12 @@ upload-art = "birdscreen.samsung_tv:upload_main"
 generate-poster = "birdscreen.gemini:main"
 build-prompt = "birdscreen.poster:main"
 make-poster = "birdscreen.pipeline:main"
+upscale = "birdscreen.upscale:main"
+
+[project.optional-dependencies]
+upscale = [
+    "spandrel>=0.4.2",
+]
 
 [build-system]
 requires = ["uv_build>=0.10.2,<0.11.0"]

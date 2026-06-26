@@ -63,6 +63,7 @@ class PosterContext:
     title: str = DEFAULT_TITLE
     language: str = DEFAULT_LANGUAGE
     style: str = DEFAULT_STYLE
+    labels: bool = True  # if False, the model paints no text; we composite labels ourselves
 
 
 def aspect_ratio(width: int, height: int) -> str:
@@ -102,27 +103,48 @@ def build_prompt(ctx: PosterContext, env: SeasonInfo) -> str:
     # Lowercase the season's first letter so it reads "It is mid-summer ...".
     season = (env.season[:1].lower() + env.season[1:]) if env.season else env.season
 
-    return f"""\
-Create a {aspect} {ctx.style}.
+    setting = (
+        f"Setting: the natural scenery around {place} — {env.scenery}. It is {season} "
+        f"({date_str}); render the vegetation accordingly — {env.foliage}. The weather is "
+        f"{weather_phrase}, lit by {env.light}. Keep the foliage, scenery and sky "
+        "botanically and seasonally accurate for this place and time of year."
+    )
 
-Setting: the natural scenery around {place} — {env.scenery}. It is {season} \
-({date_str}); render the vegetation accordingly — {env.foliage}. The weather is \
-{weather_phrase}, lit by {env.light}. Keep the foliage, scenery and sky \
-botanically and seasonally accurate for this place and time of year.
+    if ctx.labels:
+        title_block = f'\n\nTitle across the top in an elegant serif typeface: "{ctx.title}".'
+        bird_block = (
+            "\n\nFeature the following birds, each accurately and recognisably rendered to "
+            "scale and arranged naturally within a single cohesive scene (perched on "
+            "branches, resting on shoreline rocks, wading, or in flight as best suits each "
+            "species). Label each bird with a small serif caption: its common name in "
+            f"{ctx.language} on top, and beneath it its scientific (Latin) name in italics:\n"
+            f"{bird_lines}"
+        )
+        text_rule = "no text other than the title and the species labels."
+    else:
+        title_block = ""
+        bird_block = (
+            "\n\nFeature the following birds, each accurately and recognisably rendered to "
+            "scale and arranged naturally within a single cohesive scene (perched on "
+            "branches, resting on shoreline rocks, wading, or in flight as best suits each "
+            f"species):\n{bird_lines}\n\n"
+            "IMPORTANT: render absolutely NO text of any kind — no title, no captions, no "
+            "species names, no labels, no letters or numbers anywhere in the image. Paint "
+            "only the birds and the natural scenery. Compose it as a centred natural-history "
+            "illustration with comfortable empty margin around all four edges, keeping the "
+            "birds and key scenery well inside the frame (the title and species labels are "
+            "added separately afterwards, around the artwork)."
+        )
+        text_rule = "absolutely no text, letters or numbers of any kind."
 
-Title across the top in an elegant serif typeface: "{ctx.title}".
+    composition = (
+        "\n\nComposition: a calm, balanced field-guide plate on a soft parchment-toned "
+        "background, with the birds as the clear focus and natural foliage framing the "
+        "edges. Fine, detailed linework with gentle watercolor washes; no harsh outlines, "
+        f"no photographic realism, {text_rule}"
+    )
 
-Feature the following birds, each accurately and recognisably rendered to scale \
-and arranged naturally within a single cohesive scene (perched on branches, \
-resting on shoreline rocks, wading, or in flight as best suits each species). \
-Label each bird with a small serif caption: its common name in {ctx.language} on \
-top, and beneath it its scientific (Latin) name in italics:
-{bird_lines}
-
-Composition: a calm, balanced field-guide plate on a soft parchment-toned \
-background, with the birds as the clear focus and natural foliage framing the \
-edges. Fine, detailed linework with gentle watercolor washes; no harsh outlines, \
-no photographic realism, no text other than the title and the species labels."""
+    return f"Create a {aspect} {ctx.style}.\n\n{setting}{title_block}{bird_block}{composition}"
 
 
 def build_daily_prompt(
@@ -133,6 +155,7 @@ def build_daily_prompt(
     *,
     language: str = DEFAULT_LANGUAGE,
     title: str = DEFAULT_TITLE,
+    labels: bool = True,
     width: int = 3840,
     height: int = 2160,
     location_name: str | None = None,
@@ -168,6 +191,7 @@ def build_daily_prompt(
         title=title,
         language=language,
         style=style,
+        labels=labels,
     )
     if environment is None:
         environment = describe_environment_llm(
