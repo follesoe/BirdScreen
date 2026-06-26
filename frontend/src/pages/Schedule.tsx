@@ -1,6 +1,7 @@
 import { useTranslation } from 'react-i18next'
 import { api } from '@/api/client'
 import { PageHeading } from '@/components/PageHeading'
+import { PageHero } from '@/components/PageHero'
 import { Field } from '@/components/form/Field'
 import { SaveButton } from '@/components/form/SaveButton'
 import { Section } from '@/components/form/Section'
@@ -13,6 +14,7 @@ import hourglassIcon from '@/assets/icons/hourglass.png'
 import moonIcon from '@/assets/icons/moon.png'
 import owlIcon from '@/assets/icons/owl.png'
 import sunIcon from '@/assets/icons/sun.png'
+import scheduleHero from '@/assets/heroes/schedule.webp'
 
 export function Schedule() {
   const { t } = useTranslation()
@@ -29,7 +31,10 @@ export function Schedule() {
 
   return (
     <section className="max-w-2xl">
-      <PageHeading
+      <PageHero
+        title={t('pages.schedule')}
+        image={scheduleHero}
+        intro={t('schedule.intro')}
         action={
           <SaveButton
             status={status}
@@ -38,9 +43,7 @@ export function Schedule() {
             }}
           />
         }
-      >
-        {t('pages.schedule')}
-      </PageHeading>
+      />
 
       <div className="flex flex-col gap-5">
         <Section

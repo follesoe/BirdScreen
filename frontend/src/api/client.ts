@@ -27,6 +27,8 @@ export interface SettingsConfig {
   model: string
   image_size: string
   upscale: boolean
+  birdnet_url: string
+  use_weather: boolean
 }
 
 async function getJson<T>(url: string): Promise<T> {

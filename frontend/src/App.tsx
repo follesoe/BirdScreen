@@ -3,9 +3,9 @@ import { Layout } from '@/components/Layout'
 import { Gallery } from '@/pages/Gallery'
 import { Logs } from '@/pages/Logs'
 import { NotFound } from '@/pages/NotFound'
-import { Placeholder } from '@/pages/Placeholder'
 import { Schedule } from '@/pages/Schedule'
 import { Settings } from '@/pages/Settings'
+import { Tvs } from '@/pages/Tvs'
 
 export function App() {
   return (
@@ -16,7 +16,7 @@ export function App() {
           <Route path="logs" element={<Logs />} />
           <Route path="settings" element={<Settings />} />
           <Route path="schedule" element={<Schedule />} />
-          <Route path="tvs" element={<Placeholder titleKey="pages.tvs" />} />
+          <Route path="tvs" element={<Tvs />} />
           <Route path="*" element={<NotFound />} />
         </Route>
       </Routes>

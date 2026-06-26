@@ -41,11 +41,13 @@ class ScheduleConfig(BaseModel):
 
 
 class SettingsConfig(BaseModel):
-    """General settings — how posters are rendered. Grows over time."""
+    """General settings — rendering, the BirdNET-Go source, and weather. Grows over time."""
 
     model: str = "gemini-3-pro-image"
     image_size: str = "2K"
     upscale: bool = True
+    birdnet_url: str = "http://localhost:8080"
+    use_weather: bool = True
 
 
 class BirdScreenConfig(BaseModel):

@@ -17,14 +17,21 @@ export const en = {
   },
   gallery: {
     heading: 'Poster gallery',
+    intro: 'Every bird heard today, painted into a single poster.',
     loading: 'Gathering the flock…',
     empty: 'No posters yet — the birds have been quiet.',
     loadError: 'Could not load posters.',
   },
   logs: {
     heading: 'Recent logs',
+    intro: "A peek at what BirdScreen's been up to.",
     empty: 'Nothing has chirped yet.',
     refresh: 'Refresh',
+  },
+  tvs: {
+    heading: 'Frame TVs',
+    intro: 'The Frame TVs that show your posters.',
+    comingSoon: "This is where you'll add and arrange your Frame TVs — coming soon.",
   },
   pages: {
     settings: 'Settings',
@@ -39,6 +46,7 @@ export const en = {
   },
   schedule: {
     loading: 'Loading schedule…',
+    intro: 'When and how often the poster repaints itself.',
     to: 'to',
     remove: 'Remove',
     addWindow: 'Add window',
@@ -62,10 +70,18 @@ export const en = {
   },
   settings: {
     loading: 'Loading settings…',
+    intro: 'Tune how BirdScreen paints, where it listens, and what the sky is doing.',
     renderTitle: 'Image rendering',
     renderDesc: 'Which Gemini model and size each poster is rendered with.',
     model: 'Model',
     imageSize: 'Image size',
     upscale: 'Upscale to native 4K (Real-ESRGAN)',
+    birdnetTitle: 'BirdNET-Go',
+    birdnetDesc: 'Where BirdScreen reads the detected birds from.',
+    birdnetUrl: 'Server URL',
+    birdnetUrlHint: 'The BirdNET-Go web address, e.g. http://localhost:8080.',
+    weatherTitle: 'Weather',
+    weatherDesc: 'Match the live weather so each poster reflects the sky outside.',
+    useWeather: 'Use current weather (yr.no) in the scene',
   },
 } as const

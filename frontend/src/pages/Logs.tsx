@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api } from '@/api/client'
-import { PageHeading } from '@/components/PageHeading'
+import { PageHero } from '@/components/PageHero'
+import logsHero from '@/assets/heroes/logs.webp'
 
 export function Logs() {
   const { t } = useTranslation()
@@ -28,7 +29,10 @@ export function Logs() {
 
   return (
     <section>
-      <PageHeading
+      <PageHero
+        title={t('logs.heading')}
+        image={logsHero}
+        intro={t('logs.intro')}
         action={
           <button
             type="button"
@@ -38,9 +42,7 @@ export function Logs() {
             {t('logs.refresh')}
           </button>
         }
-      >
-        {t('logs.heading')}
-      </PageHeading>
+      />
       {lines.length === 0 ? (
         <p className="text-ink-soft">{t('logs.empty')}</p>
       ) : (
