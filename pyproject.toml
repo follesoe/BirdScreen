@@ -8,7 +8,9 @@ authors = [
 ]
 requires-python = ">=3.13"
 dependencies = [
+    "google-genai>=2.10.0",
     "pillow>=12.2.0",
+    "python-dotenv>=1.2.2",
     "samsungtvws>=3.0.5",
 ]
 
@@ -16,6 +18,9 @@ dependencies = [
 birdscreen = "birdscreen:main"
 check-tv = "birdscreen.samsung_tv:main"
 upload-art = "birdscreen.samsung_tv:upload_main"
+generate-poster = "birdscreen.gemini:main"
+build-prompt = "birdscreen.poster:main"
+make-poster = "birdscreen.pipeline:main"
 
 [build-system]
 requires = ["uv_build>=0.10.2,<0.11.0"]

@@ -18,6 +18,7 @@ birdnet-go
 # BirdNET-Go local data, models, logs & config
 data/
 cache/
+posters/
 logs/
 *.log
 config.yaml
