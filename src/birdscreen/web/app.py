@@ -7,6 +7,8 @@ The React frontend (built to ``frontend/dist``) is served at ``/``.
 from __future__ import annotations
 
 import logging
+import os
+import socket
 from datetime import datetime
 from pathlib import Path
 
@@ -194,10 +196,31 @@ def create_app() -> FastAPI:
     return app
 
 
+def _lan_ip() -> str:
+    """Best-effort primary LAN IP (for logging a reachable URL)."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        sock.connect(("8.8.8.8", 80))  # no packets sent; just selects the egress interface
+        return str(sock.getsockname()[0])
+    except OSError:
+        return "127.0.0.1"
+    finally:
+        sock.close()
+
+
 def main() -> None:
     setup_logging()
-    logger.info("Starting BirdScreen web on http://127.0.0.1:8000")
-    uvicorn.run(create_app(), host="127.0.0.1", port=8000)
+    # Bind all interfaces by default so other devices on the LAN can reach the UI;
+    # override with BIRDSCREEN_WEB_HOST / BIRDSCREEN_WEB_PORT.
+    host = os.environ.get("BIRDSCREEN_WEB_HOST", "0.0.0.0")
+    port = int(os.environ.get("BIRDSCREEN_WEB_PORT", "8000"))
+    logger.info(
+        "Starting BirdScreen web — local: http://127.0.0.1:%d  LAN: http://%s:%d",
+        port,
+        _lan_ip(),
+        port,
+    )
+    uvicorn.run(create_app(), host=host, port=port)
 
 
 if __name__ == "__main__":
