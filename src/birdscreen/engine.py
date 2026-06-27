@@ -9,24 +9,30 @@ status page just *shows* them.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, time, timedelta
+from datetime import datetime, timedelta
 
 from birdscreen.config import ActiveWindow, ScheduleConfig
 
 _SATURDAY = 5  # datetime.weekday(): Mon=0 … Sat=5, Sun=6
+_DAY_MINUTES = 24 * 60
 
 
-def _hm(value: str) -> time:
+def _minutes(value: str) -> int:
+    """Minutes since midnight (0–1440). Accepts '24:00' as end-of-day."""
     hour, _, minute = value.partition(":")
-    clamped_hour = min(max(int(hour or 0), 0), 23)
-    clamped_minute = min(max(int(minute or 0), 0), 59)
-    return time(clamped_hour, clamped_minute)
+    total = max(int(hour or 0), 0) * 60 + max(int(minute or 0), 0)
+    return min(total, _DAY_MINUTES)
+
+
+def _at(day: datetime, minutes: int) -> datetime:
+    """A datetime on ``day`` at ``minutes`` since midnight (capped at 23:59)."""
+    hour, minute = divmod(min(minutes, _DAY_MINUTES - 1), 60)
+    return day.replace(hour=hour, minute=minute, second=0, microsecond=0)
 
 
 def bird_day_start(now: datetime, day_reset: str) -> datetime:
     """The most recent day-reset boundary at or before ``now``."""
-    reset = _hm(day_reset)
-    boundary = now.replace(hour=reset.hour, minute=reset.minute, second=0, microsecond=0)
+    boundary = _at(now, _minutes(day_reset))
     if now < boundary:
         boundary -= timedelta(days=1)
     return boundary
@@ -40,9 +46,9 @@ def windows_for_day(day: datetime, schedule: ScheduleConfig) -> list[ActiveWindo
 
 def active_window(now: datetime, schedule: ScheduleConfig) -> ActiveWindow | None:
     """The active window containing ``now``, or None if outside all of them."""
-    current = now.time()
+    current = now.hour * 60 + now.minute
     for window in windows_for_day(now, schedule):
-        if _hm(window.start) <= current <= _hm(window.end):
+        if _minutes(window.start) <= current <= _minutes(window.end):
             return window
     return None
 
@@ -51,10 +57,9 @@ def next_window_start(now: datetime, schedule: ScheduleConfig) -> datetime | Non
     """Start of the next active window strictly after ``now`` (searches 8 days)."""
     for offset in range(8):
         day = now + timedelta(days=offset)
-        windows = sorted(windows_for_day(day, schedule), key=lambda w: _hm(w.start))
+        windows = sorted(windows_for_day(day, schedule), key=lambda w: _minutes(w.start))
         for window in windows:
-            start_t = _hm(window.start)
-            start = day.replace(hour=start_t.hour, minute=start_t.minute, second=0, microsecond=0)
+            start = _at(day, _minutes(window.start))
             if start > now:
                 return start
     return None

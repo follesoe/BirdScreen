@@ -5,6 +5,7 @@ import { Logs } from '@/pages/Logs'
 import { NotFound } from '@/pages/NotFound'
 import { Schedule } from '@/pages/Schedule'
 import { Settings } from '@/pages/Settings'
+import { Status } from '@/pages/Status'
 import { Tvs } from '@/pages/Tvs'
 
 export function App() {
@@ -13,6 +14,7 @@ export function App() {
       <Routes>
         <Route element={<Layout />}>
           <Route index element={<Gallery />} />
+          <Route path="status" element={<Status />} />
           <Route path="logs" element={<Logs />} />
           <Route path="settings" element={<Settings />} />
           <Route path="schedule" element={<Schedule />} />

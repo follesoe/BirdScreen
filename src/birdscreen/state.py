@@ -28,7 +28,8 @@ CREATE TABLE IF NOT EXISTS generations (
     weather     TEXT,
     model       TEXT NOT NULL,
     image_size  TEXT NOT NULL,
-    output      TEXT                       -- poster filename
+    output      TEXT,                      -- poster filename
+    prompt      TEXT                       -- the full prompt sent to the image model
 );
 """
 
@@ -46,6 +47,7 @@ class GenerationRecord:
     season: str | None = None
     weather: str | None = None
     output: str | None = None
+    prompt: str | None = None
     id: int = 0  # set on read
     created_at: str = ""  # ISO; defaults to now on insert
 
@@ -73,6 +75,7 @@ def _row_to_record(row: sqlite3.Row) -> GenerationRecord:
         model=row["model"],
         image_size=row["image_size"],
         output=row["output"],
+        prompt=row["prompt"],
     )
 
 
@@ -83,7 +86,7 @@ def record_generation(record: GenerationRecord) -> int:
         cur = conn.execute(
             "INSERT INTO generations "
             "(created_at, trigger, reason, birds, location, season, weather, model, "
-            "image_size, output) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "image_size, output, prompt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 created,
                 record.trigger,
@@ -95,6 +98,7 @@ def record_generation(record: GenerationRecord) -> int:
                 record.model,
                 record.image_size,
                 record.output,
+                record.prompt,
             ),
         )
         return int(cur.lastrowid or 0)

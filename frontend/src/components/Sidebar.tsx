@@ -1,13 +1,16 @@
 import { NavLink } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import logoUrl from '@/assets/birdscreen-logo.webp'
+import treeUrl from '@/assets/sidebar-tree.webp'
 import galleryIcon from '@/assets/icons/gallery.png'
+import statusIcon from '@/assets/icons/status.png'
 import logsIcon from '@/assets/icons/logs.png'
 import settingsIcon from '@/assets/icons/settings.png'
 import scheduleIcon from '@/assets/icons/schedule.png'
 import tvsIcon from '@/assets/icons/tvs.png'
 
 const NAV_ITEMS = [
+  { to: '/status', icon: statusIcon, labelKey: 'nav.status' },
   { to: '/', icon: galleryIcon, labelKey: 'nav.gallery' },
   { to: '/logs', icon: logsIcon, labelKey: 'nav.logs' },
   { to: '/settings', icon: settingsIcon, labelKey: 'nav.settings' },
@@ -25,7 +28,7 @@ function linkClasses({ isActive }: { isActive: boolean }): string {
 export function Sidebar() {
   const { t } = useTranslation()
   return (
-    <aside className="flex w-72 flex-col border-r border-bark/25 bg-parchment-deep">
+    <aside className="flex w-72 flex-col overflow-y-auto border-r border-bark/25 bg-parchment-deep">
       <div className="px-4 pt-5 pb-4">
         <img src={logoUrl} alt={t('app.title')} className="w-full" />
         <div className="mt-4 text-center">
@@ -35,7 +38,7 @@ export function Sidebar() {
           <p className="font-body text-base text-robin italic">{t('app.subtitle')}</p>
         </div>
       </div>
-      <nav className="flex flex-1 flex-col gap-1 px-3">
+      <nav className="flex flex-col gap-1 px-3">
         {NAV_ITEMS.map((item) => (
           <NavLink key={item.to} to={item.to} end={item.to === '/'} className={linkClasses}>
             <img src={item.icon} alt="" className="h-11 w-11 shrink-0" />
@@ -43,7 +46,9 @@ export function Sidebar() {
           </NavLink>
         ))}
       </nav>
-      <p className="px-5 py-4 font-body text-xs text-ink-soft">{t('app.tagline')}</p>
+      {/* Tree of Norwegian birds, top tucked under the last menu item. It's cut off
+          at the sidebar's bottom edge; scroll the sidebar to see the whole tree. */}
+      <img src={treeUrl} alt="" aria-hidden="true" className="mt-6 w-full shrink-0 select-none" />
     </aside>
   )
 }

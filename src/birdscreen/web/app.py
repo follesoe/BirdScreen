@@ -113,6 +113,7 @@ class StatusResponse(BaseModel):
     birdnet_connected: bool
     species_today: list[str]
     last_generation: GenerationLogEntry | None
+    tvs: list[TvConfig]
 
 
 def _parse_date(name: str) -> str | None:
@@ -309,6 +310,8 @@ def _compute_status() -> StatusResponse:
     species: list[str] = []
     if settings.birdnet_url:
         try:
+            # High-confidence species only — low-confidence detections (e.g. a lone
+            # 0.65 sothøne) are intentionally dropped to avoid false positives.
             species = birdnet.today_species(settings.birdnet_url)
             birdnet_connected = True
         except Exception as exc:
@@ -330,6 +333,7 @@ def _compute_status() -> StatusResponse:
         birdnet_connected=birdnet_connected,
         species_today=species,
         last_generation=_to_log_entry(last) if last else None,
+        tvs=config.tvs,
     )
 
 

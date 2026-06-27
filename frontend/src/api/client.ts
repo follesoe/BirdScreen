@@ -58,6 +58,39 @@ export interface BirdnetStatus {
   message: string | null
 }
 
+export interface GenerationLogEntry {
+  id: number
+  created_at: string
+  trigger: string
+  reason: string | null
+  birds: string[]
+  location: string | null
+  season: string | null
+  weather: string | null
+  model: string
+  image_size: string
+  output: string | null
+}
+
+export interface StatusResponse {
+  now: string
+  bird_day_start: string
+  in_active_window: boolean
+  current_window: string | null
+  next_window_start: string | null
+  generations_today: number
+  daily_cap: number
+  next_state: string
+  next_eligible_at: string | null
+  next_reason: string
+  weather: string | null
+  location_name: string | null
+  birdnet_connected: boolean
+  species_today: string[]
+  last_generation: GenerationLogEntry | null
+  tvs: TvConfig[]
+}
+
 async function getJson<T>(url: string): Promise<T> {
   const res = await fetch(url)
   if (!res.ok) {
@@ -95,4 +128,7 @@ export const api = {
     getJson<TvStatus>(`/api/tvs/status?ip=${encodeURIComponent(ip)}&pair=${String(pair)}`),
   birdnetStatus: (url: string): Promise<BirdnetStatus> =>
     getJson<BirdnetStatus>(`/api/birdnet/status?url=${encodeURIComponent(url)}`),
+  status: (): Promise<StatusResponse> => getJson<StatusResponse>('/api/status'),
+  generations: (): Promise<GenerationLogEntry[]> =>
+    getJson<GenerationLogEntry[]>('/api/generations'),
 }

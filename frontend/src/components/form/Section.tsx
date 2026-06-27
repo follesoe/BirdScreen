@@ -9,7 +9,7 @@ interface SectionProps {
 
 export function Section({ title, description, icon, children }: SectionProps) {
   return (
-    <section className="rounded-2xl border border-bark/25 bg-parchment-deep/50 p-5">
+    <section className="rounded-lg border border-bark/30 bg-paper p-5 shadow-[0_2px_10px_-3px_rgba(74,58,40,0.22)]">
       <h3 className="flex items-center gap-3 font-display text-2xl text-ink">
         {icon !== undefined ? <img src={icon} alt="" className="h-14 w-14" /> : null}
         {title}
