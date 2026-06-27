@@ -35,6 +35,8 @@ export const en = {
     empty: 'No TVs yet — add your first Frame.',
     add: '+ Add a TV',
     remove: 'Remove',
+    paused: 'Paused',
+    enabled: 'Update this TV (push new posters)',
     defaultName: 'Frame TV',
     ip: 'IP address',
     ipHint: "The TV's local IP, e.g. 192.168.1.219.",

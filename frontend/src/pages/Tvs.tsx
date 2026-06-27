@@ -92,7 +92,10 @@ export function Tvs() {
         <button
           type="button"
           onClick={() => {
-            mutate([...tvs, { name: t('tvs.defaultName'), ip: '', monitor_art_mode: true }])
+            mutate([
+              ...tvs,
+              { name: t('tvs.defaultName'), ip: '', enabled: true, monitor_art_mode: true },
+            ])
           }}
           className="self-start rounded-full border border-bark/40 px-5 py-2 font-body text-ink-soft transition-colors hover:bg-parchment-deep"
         >

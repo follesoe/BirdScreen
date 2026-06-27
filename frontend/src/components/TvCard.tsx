@@ -72,6 +72,11 @@ export function TvCard({ tv, onChange, onRemove }: TvCardProps) {
           }}
           className={`${controlClass} flex-1 font-display text-xl`}
         />
+        {!tv.enabled ? (
+          <span className="rounded-full bg-bark/20 px-2.5 py-0.5 font-body text-xs tracking-wide text-ink-soft uppercase">
+            {t('tvs.paused')}
+          </span>
+        ) : null}
         <button
           type="button"
           onClick={onRemove}
@@ -101,13 +106,22 @@ export function TvCard({ tv, onChange, onRemove }: TvCardProps) {
             </button>
           </div>
         </Field>
-        <Toggle
-          checked={tv.monitor_art_mode}
-          label={t('tvs.monitorArt')}
-          onChange={(v) => {
-            onChange({ monitor_art_mode: v })
-          }}
-        />
+        <div className="flex flex-wrap gap-x-8 gap-y-2">
+          <Toggle
+            checked={tv.enabled}
+            label={t('tvs.enabled')}
+            onChange={(v) => {
+              onChange({ enabled: v })
+            }}
+          />
+          <Toggle
+            checked={tv.monitor_art_mode}
+            label={t('tvs.monitorArt')}
+            onChange={(v) => {
+              onChange({ monitor_art_mode: v })
+            }}
+          />
+        </div>
         {status !== null ? <StatusView status={status} /> : null}
       </div>
     </section>

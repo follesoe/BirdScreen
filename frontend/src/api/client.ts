@@ -34,6 +34,7 @@ export interface SettingsConfig {
 export interface TvConfig {
   name: string
   ip: string
+  enabled: boolean
   monitor_art_mode: boolean
 }
 

@@ -55,6 +55,9 @@ class TvConfig(BaseModel):
 
     name: str = "Frame TV"
     ip: str = ""
+    # Master switch: push posters to this TV. Off = keep it configured but don't
+    # update it (e.g. you're using the TV for something else for a while).
+    enabled: bool = True
     # Only paint when the TV is in Art Mode; also a cue to watch for it entering
     # Art Mode so we can render a fresh picture while it's ready to show one.
     monitor_art_mode: bool = True
