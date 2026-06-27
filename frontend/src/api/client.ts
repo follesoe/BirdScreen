@@ -44,8 +44,17 @@ export interface TvStatus {
   model: string | null
   resolution: string | null
   firmware: string | null
-  art_mode: boolean
+  supports_art_mode: boolean
+  art_mode_on: boolean | null
+  paired: boolean
   token_auth: boolean
+  message: string | null
+}
+
+export interface BirdnetStatus {
+  connected: boolean
+  status_code: number | null
+  server: string | null
   message: string | null
 }
 
@@ -82,6 +91,8 @@ export const api = {
     putJson<SettingsConfig>('/api/config/settings', config),
   tvs: (): Promise<TvConfig[]> => getJson<TvConfig[]>('/api/config/tvs'),
   saveTvs: (tvs: TvConfig[]): Promise<TvConfig[]> => putJson<TvConfig[]>('/api/config/tvs', tvs),
-  tvStatus: (ip: string): Promise<TvStatus> =>
-    getJson<TvStatus>(`/api/tvs/status?ip=${encodeURIComponent(ip)}`),
+  tvStatus: (ip: string, pair = false): Promise<TvStatus> =>
+    getJson<TvStatus>(`/api/tvs/status?ip=${encodeURIComponent(ip)}&pair=${String(pair)}`),
+  birdnetStatus: (url: string): Promise<BirdnetStatus> =>
+    getJson<BirdnetStatus>(`/api/birdnet/status?url=${encodeURIComponent(url)}`),
 }

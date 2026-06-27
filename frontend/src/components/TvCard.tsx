@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api, type TvConfig, type TvStatus } from '@/api/client'
 import { Field } from '@/components/form/Field'
@@ -25,12 +25,19 @@ function StatusView({ status }: { status: TvStatus | 'loading' }) {
       </div>
     )
   }
+  let inArtMode: string
+  if (status.art_mode_on === null) {
+    inArtMode = t('tvs.unknown')
+  } else {
+    inArtMode = status.art_mode_on ? t('tvs.yes') : t('tvs.no')
+  }
   const rows: [string, string | null][] = [
     [t('tvs.statusName'), status.name],
     [t('tvs.statusModel'), status.model],
     [t('tvs.statusResolution'), status.resolution],
     [t('tvs.statusFirmware'), status.firmware],
-    [t('tvs.statusArtMode'), status.art_mode ? t('tvs.yes') : t('tvs.no')],
+    [t('tvs.statusSupportsArt'), status.supports_art_mode ? t('tvs.yes') : t('tvs.no')],
+    [t('tvs.statusInArt'), inArtMode],
   ]
   return (
     <dl className="rounded-lg border border-bark/25 bg-parchment p-3 text-sm">
@@ -42,6 +49,7 @@ function StatusView({ status }: { status: TvStatus | 'loading' }) {
           </div>
         ) : null,
       )}
+      {!status.paired ? <p className="mt-2 text-xs text-ink-soft">{t('tvs.pairHint')}</p> : null}
     </dl>
   )
 }
@@ -50,16 +58,34 @@ export function TvCard({ tv, onChange, onRemove }: TvCardProps) {
   const { t } = useTranslation()
   const [status, setStatus] = useState<TvStatus | 'loading' | null>(null)
 
-  function check() {
-    if (tv.ip === '') return
-    setStatus('loading')
-    void api
-      .tvStatus(tv.ip)
-      .then(setStatus)
-      .catch(() => {
+  const check = useCallback(
+    (pair = false) => {
+      if (tv.ip === '') {
         setStatus(null)
-      })
-  }
+        return
+      }
+      setStatus('loading')
+      void api
+        .tvStatus(tv.ip, pair)
+        .then((s) => {
+          setStatus(s)
+        })
+        .catch(() => {
+          setStatus(null)
+        })
+    },
+    [tv.ip],
+  )
+
+  // Auto-check on load — popup-free (pair=false); the manual button pairs.
+  useEffect(() => {
+    const id = setTimeout(() => {
+      check(false)
+    }, 500)
+    return () => {
+      clearTimeout(id)
+    }
+  }, [check])
 
   return (
     <section className="rounded-2xl border border-bark/25 bg-parchment-deep/50 p-5">
@@ -98,7 +124,9 @@ export function TvCard({ tv, onChange, onRemove }: TvCardProps) {
             />
             <button
               type="button"
-              onClick={check}
+              onClick={() => {
+                check(true)
+              }}
               disabled={tv.ip === ''}
               className="rounded-full border border-bark/40 px-4 py-2 font-body text-sm text-ink-soft transition-colors hover:bg-parchment disabled:opacity-50"
             >

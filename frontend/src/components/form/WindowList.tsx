@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next'
 import type { ActiveWindow } from '@/api/client'
-import { controlClass } from '@/components/form/styles'
+import { TimeInput } from '@/components/form/TimeInput'
 
 interface WindowListProps {
   windows: ActiveWindow[]
@@ -18,22 +18,18 @@ export function WindowList({ windows, onChange }: WindowListProps) {
     <div className="flex flex-col gap-2">
       {windows.map((window, index) => (
         <div key={index} className="flex items-center gap-2">
-          <input
-            type="time"
+          <TimeInput
             value={window.start}
-            onChange={(e) => {
-              patch(index, { start: e.target.value })
+            onChange={(v) => {
+              patch(index, { start: v })
             }}
-            className={controlClass}
           />
           <span className="font-body text-ink-soft">{t('schedule.to')}</span>
-          <input
-            type="time"
+          <TimeInput
             value={window.end}
-            onChange={(e) => {
-              patch(index, { end: e.target.value })
+            onChange={(v) => {
+              patch(index, { end: v })
             }}
-            className={controlClass}
           />
           <button
             type="button"

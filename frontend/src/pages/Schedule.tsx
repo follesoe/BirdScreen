@@ -5,6 +5,7 @@ import { PageHero } from '@/components/PageHero'
 import { Field } from '@/components/form/Field'
 import { SaveButton } from '@/components/form/SaveButton'
 import { Section } from '@/components/form/Section'
+import { TimeInput } from '@/components/form/TimeInput'
 import { controlClass } from '@/components/form/styles'
 import { WindowList } from '@/components/form/WindowList'
 import { useEditableConfig } from '@/hooks/useEditableConfig'
@@ -52,13 +53,11 @@ export function Schedule() {
           icon={calendarIcon}
         >
           <Field label={t('schedule.dayReset')} hint={t('schedule.dayResetHint')} icon={moonIcon}>
-            <input
-              type="time"
+            <TimeInput
               value={config.day_reset}
-              onChange={(e) => {
-                update('day_reset', e.target.value)
+              onChange={(v) => {
+                update('day_reset', v)
               }}
-              className={controlClass}
             />
           </Field>
           <Field label={t('schedule.dailyCap')} hint={t('schedule.dailyCapHint')}>

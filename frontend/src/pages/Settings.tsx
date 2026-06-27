@@ -1,5 +1,6 @@
+import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { api } from '@/api/client'
+import { api, type BirdnetStatus } from '@/api/client'
 import { PageHeading } from '@/components/PageHeading'
 import { PageHero } from '@/components/PageHero'
 import { Field } from '@/components/form/Field'
@@ -16,9 +17,47 @@ import weatherIcon from '@/assets/icons/weather.png'
 const MODELS = ['gemini-3-pro-image', 'gemini-2.5-flash-image']
 const SIZES = ['1K', '2K', '4K']
 
+function BirdnetStatusLine({ status }: { status: BirdnetStatus | 'loading' }) {
+  const { t } = useTranslation()
+  if (status === 'loading') {
+    return <p className="text-sm text-ink-soft">{t('settings.birdnetChecking')}</p>
+  }
+  if (!status.connected) {
+    return <p className="text-sm text-robin">{status.message ?? t('settings.birdnetError')}</p>
+  }
+  return <p className="text-sm text-sage">{t('settings.birdnetOk')}</p>
+}
+
 export function Settings() {
   const { t } = useTranslation()
   const { config, status, update, save } = useEditableConfig(api.settings, api.saveSettings)
+
+  // Verify the BirdNET-Go connection on load (debounced re-check if the URL is edited).
+  const birdnetUrl = config?.birdnet_url ?? ''
+  const [birdnet, setBirdnet] = useState<BirdnetStatus | 'loading' | null>(null)
+  const checkBirdnet = useCallback(() => {
+    if (birdnetUrl === '') {
+      setBirdnet(null)
+      return
+    }
+    setBirdnet('loading')
+    void api
+      .birdnetStatus(birdnetUrl)
+      .then((s) => {
+        setBirdnet(s)
+      })
+      .catch(() => {
+        setBirdnet(null)
+      })
+  }, [birdnetUrl])
+
+  // Verify on load (and re-check, debounced, if the URL is edited).
+  useEffect(() => {
+    const id = setTimeout(checkBirdnet, 500)
+    return () => {
+      clearTimeout(id)
+    }
+  }, [checkBirdnet])
 
   if (config === null) {
     return (
@@ -105,6 +144,7 @@ export function Settings() {
               className={controlClass}
             />
           </Field>
+          {birdnet !== null ? <BirdnetStatusLine status={birdnet} /> : null}
         </Section>
 
         <Section

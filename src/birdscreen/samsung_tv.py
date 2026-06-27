@@ -104,6 +104,23 @@ def supports_art_mode(host: str) -> bool:
     return tv.art().supported()
 
 
+def art_state(host: str, token_file: str) -> tuple[bool, bool | None]:
+    """``(supports_art_mode, currently_in_art_mode)`` over the Art websocket.
+
+    Authoritative (unlike REST ``FrameTVSupport``, which is unreliable on older
+    Frames). Uses the cached token, so no popup once paired; the first call on an
+    unpaired TV triggers the "Allow" popup. ``currently_in_art_mode`` is None if
+    the TV doesn't report it.
+    """
+    tv = SamsungTVWS(host=host, port=ART_WS_PORT, token_file=token_file, name=CLIENT_NAME)
+    art: Any = tv.art()
+    supported = bool(art.supported())
+    current: bool | None = None
+    with contextlib.suppress(Exception):
+        current = str(art.get_artmode()).lower() == "on"
+    return supported, current
+
+
 def check_art_websocket(host: str, token_file: str) -> dict[str, Any]:
     """Connect over the Art websocket and return version + current artwork.
 

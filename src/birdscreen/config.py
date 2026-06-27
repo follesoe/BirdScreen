@@ -7,12 +7,14 @@ Missing file → defaults; the web UI reads and writes it.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import yaml
 from pydantic import BaseModel, Field
 
-CONFIG_PATH = Path("config.yaml")
+# Override with BIRDSCREEN_CONFIG (used by tests so they never touch the real file).
+CONFIG_PATH = Path(os.environ.get("BIRDSCREEN_CONFIG", "config.yaml"))
 
 
 class ActiveWindow(BaseModel):
@@ -48,6 +50,8 @@ class SettingsConfig(BaseModel):
     upscale: bool = True
     birdnet_url: str = "http://localhost:8080"
     use_weather: bool = True
+    latitude: float | None = None  # for weather + the season/scene; manual for now
+    longitude: float | None = None
 
 
 class TvConfig(BaseModel):
