@@ -82,7 +82,7 @@ def next_window_start(now: datetime, schedule: ScheduleConfig) -> datetime | Non
 class NextGeneration:
     """When/whether the next poster can be painted, and why."""
 
-    state: str  # 'ready' | 'outside_window' | 'cooldown' | 'cap_reached'
+    state: str  # 'ready' | 'no_tvs' | 'outside_window' | 'cooldown' | 'cap_reached'
     eligible_at: datetime | None
     reason: str
 
@@ -93,8 +93,16 @@ def plan_next(
     *,
     generations_today: int,
     last_generation_at: datetime | None,
+    has_enabled_tv: bool = True,
 ) -> NextGeneration:
     """Decide the next-render state from the schedule, today's count and last render."""
+    if not has_enabled_tv:
+        return NextGeneration(
+            state="no_tvs",
+            eligible_at=None,
+            reason="No TVs are set to receive posters — enable a TV to start painting.",
+        )
+
     if generations_today >= schedule.daily_cap:
         return NextGeneration(
             state="cap_reached",

@@ -76,6 +76,7 @@ export const en = {
       cooldown: 'Cooling down',
       outside_window: 'Outside hours',
       cap_reached: 'Daily limit reached',
+      no_tvs: 'No TVs active',
     },
   },
   tvs: {

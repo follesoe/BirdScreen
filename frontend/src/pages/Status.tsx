@@ -16,6 +16,7 @@ const STATE_TONE: Record<string, string> = {
   cooldown: 'bg-amber/30 text-ink',
   outside_window: 'bg-amber/30 text-ink',
   cap_reached: 'bg-robin/20 text-robin',
+  no_tvs: 'bg-robin/20 text-robin',
 }
 
 function fmtTime(iso: string | null): string {

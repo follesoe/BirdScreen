@@ -10,6 +10,7 @@ import logging
 import os
 import socket
 import threading
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -37,7 +38,18 @@ FRONTEND_DIST = Path("frontend/dist")
 _IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp"}
 _THUMB_MAX = 480
 _SERVER_ERROR_STATUS = 500  # HTTP 5xx → treat the server as unhealthy
-_generation_lock = threading.Lock()  # prevents overlapping manual generations
+_generation_lock = threading.Lock()  # prevents overlapping manual/auto generations
+_SCHEDULER_INTERVAL_S = 60  # how often the auto-generation loop re-checks the rules
+
+
+class _SchedulerState:
+    """Mutable state for the background auto-generation loop (avoids module globals)."""
+
+    started = False
+    pending_since: datetime | None = None  # when new species first appeared (debounce)
+
+
+_scheduler = _SchedulerState()
 
 
 class PosterInfo(BaseModel):
@@ -324,7 +336,13 @@ def _compute_status() -> StatusResponse:
     gens_today = state.count_generations_since(day_start)
     last = state.last_generation()
     last_at = datetime.fromisoformat(last.created_at) if last else None
-    plan = engine.plan_next(now, schedule, generations_today=gens_today, last_generation_at=last_at)
+    plan = engine.plan_next(
+        now,
+        schedule,
+        generations_today=gens_today,
+        last_generation_at=last_at,
+        has_enabled_tv=any(tv.enabled for tv in config.tvs),
+    )
 
     location = _resolve_location(settings)
     weather_text: str | None = None
@@ -440,8 +458,112 @@ def _send_to_tvs(name: str, *, enabled_only: bool = False) -> SendResult:
     )
 
 
+def _auto_generate(reason: str, trigger: str, new_species: set[str]) -> None:
+    """Render + hang one poster automatically (skips if a generation is in flight)."""
+    if not _generation_lock.acquire(blocking=False):
+        return  # a manual or auto generation is already running
+    _scheduler.pending_since = None
+    try:
+        logger.info("Scheduler: auto-generating (%s) — %s", trigger, ", ".join(sorted(new_species)))
+        record = generate.generate_now(trigger=trigger, reason=reason)
+        if record.output:
+            result = _send_to_tvs(record.output, enabled_only=True)
+            logger.info("Scheduler: hung %s — %s", record.output, result.message)
+    except Exception:
+        logger.exception("Scheduler: auto-generation failed")
+    finally:
+        _generation_lock.release()
+
+
+def _species_to_paint(
+    settings: SettingsConfig,
+    day_start: datetime,
+    now: datetime,
+    last: state.GenerationRecord | None,
+    last_at: datetime | None,
+) -> set[str]:
+    """Species warranting a render: new ones since today's last poster, or all if none yet."""
+    if not settings.birdnet_url:
+        return set()
+    try:
+        species = {
+            c for _s, c in birdnet.birds_for_day(settings.birdnet_url, start=day_start, now=now)
+        }
+    except Exception as exc:
+        logger.warning("Scheduler: species fetch failed: %s", exc)
+        return set()
+    last_today = last is not None and last_at is not None and last_at >= day_start
+    if not (last_today and last):
+        return species  # first poster of the day → paint whatever has been heard
+    return species - set(last.birds)
+
+
+def _tick() -> None:
+    """One scheduler pass: apply the rules and auto-generate when warranted."""
+    config = load_config()
+    schedule, settings = config.schedule, config.settings
+    now = datetime.now()
+    day_start = engine.bird_day_start(now, schedule.day_reset)
+    last = state.last_generation()
+    last_at = datetime.fromisoformat(last.created_at) if last else None
+    plan = engine.plan_next(
+        now,
+        schedule,
+        generations_today=state.count_generations_since(day_start),
+        last_generation_at=last_at,
+        has_enabled_tv=any(tv.enabled for tv in config.tvs),
+    )
+
+    new_species = (
+        _species_to_paint(settings, day_start, now, last, last_at)
+        if plan.state == "ready"
+        else set()
+    )
+    if not new_species:  # not eligible, nothing heard, or nothing new since the last poster
+        _scheduler.pending_since = None
+        return
+
+    # Debounce: wait debounce_minutes after first seeing new species, to batch a burst.
+    if _scheduler.pending_since is None:
+        _scheduler.pending_since = now
+        logger.info(
+            "Scheduler: %d new species — debouncing %d min",
+            len(new_species),
+            schedule.debounce_minutes,
+        )
+        return
+    if (now - _scheduler.pending_since).total_seconds() >= schedule.debounce_minutes * 60:
+        first_today = last is None or last_at is None or last_at < day_start
+        trigger = "time" if first_today else "bird"
+        reason = (
+            "First poster of the day"
+            if first_today
+            else f"New birds heard: {', '.join(sorted(new_species))}"
+        )
+        _auto_generate(reason, trigger, new_species)
+
+
+def _scheduler_loop() -> None:
+    while True:
+        time.sleep(_SCHEDULER_INTERVAL_S)
+        try:
+            _tick()
+        except Exception:
+            logger.exception("Scheduler tick failed")
+
+
+def _start_scheduler() -> None:
+    """Start the background auto-generation loop once (disabled by BIRDSCREEN_NO_SCHEDULER)."""
+    if _scheduler.started or os.environ.get("BIRDSCREEN_NO_SCHEDULER"):
+        return
+    _scheduler.started = True
+    threading.Thread(target=_scheduler_loop, daemon=True).start()
+    logger.info("Auto-generation scheduler started (every %ds)", _SCHEDULER_INTERVAL_S)
+
+
 def create_app() -> FastAPI:
     setup_logging()
+    _start_scheduler()
     app = FastAPI(title="BirdScreen", version="0.1.0")
 
     @app.get("/api/health")
