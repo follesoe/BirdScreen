@@ -4,8 +4,9 @@ version = "0.1.0"
 description = "Listen for birds with BirdNET, generate a daily poster with Gemini, and display it on a Samsung The Frame TV."
 readme = "README.md"
 authors = [
-    { name = "Jonas Follesø", email = "jonas@follesoe.no" }
+    { name = "Jonas Follesø" }
 ]
+license = "MIT"
 requires-python = ">=3.13"
 dependencies = [
     "google-genai>=2.10.0",

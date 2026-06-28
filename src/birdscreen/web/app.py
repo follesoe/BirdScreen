@@ -11,6 +11,7 @@ import os
 import socket
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 
@@ -39,6 +40,8 @@ _IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp"}
 _THUMB_MAX = 480
 _SERVER_ERROR_STATUS = 500  # HTTP 5xx → treat the server as unhealthy
 _generation_lock = threading.Lock()  # prevents overlapping manual/auto generations
+_geocode_cache: dict[tuple[float, float], str | None] = {}  # coords → place name (stable)
+_coords_cache: dict[str, tuple[float, float] | None] = {}  # birdnet_url → lat/lon (stable)
 _SCHEDULER_INTERVAL_S = 60  # how often the auto-generation loop re-checks the rules
 
 
@@ -278,29 +281,69 @@ def _birdnet_status(url: str) -> BirdnetStatus:
     )
 
 
-def _resolve_location(settings: SettingsConfig) -> LocationInfo:
-    """Location from the manual override, else read from BirdNET-Go; + a place name."""
-    coords: tuple[float, float] | None = None
-    source = "none"
+def _resolve_coords(settings: SettingsConfig) -> tuple[tuple[float, float] | None, str]:
+    """(lat, lon), source — manual override, else read from BirdNET-Go (cached; stable)."""
     if settings.latitude is not None and settings.longitude is not None:
-        coords = (settings.latitude, settings.longitude)
-        source = "settings"
-    elif settings.birdnet_url:
+        return (settings.latitude, settings.longitude), "settings"
+    if not settings.birdnet_url:
+        return None, "none"
+    if settings.birdnet_url not in _coords_cache:
         try:
-            coords = birdnet.fetch_location(settings.birdnet_url)
-            source = "birdnet" if coords else "none"
+            _coords_cache[settings.birdnet_url] = birdnet.fetch_location(settings.birdnet_url)
         except Exception as exc:
             logger.warning("BirdNET-Go location lookup failed: %s", exc)
-    name: str | None = None
-    if coords is not None:
+            return None, "none"
+    coords = _coords_cache[settings.birdnet_url]
+    return coords, ("birdnet" if coords else "none")
+
+
+def _geocode_name(coords: tuple[float, float] | None) -> str | None:
+    """Reverse-geocode a place name, cached by (rounded) coordinates — location is stable."""
+    if coords is None:
+        return None
+    key = (round(coords[0], 3), round(coords[1], 3))
+    if key not in _geocode_cache:
         try:
-            name = reverse_geocode(coords[0], coords[1])
+            _geocode_cache[key] = reverse_geocode(coords[0], coords[1])
         except Exception as exc:
             logger.warning("Reverse geocode failed: %s", exc)
+            return None
+    return _geocode_cache[key]
+
+
+def _weather_text(settings: SettingsConfig, coords: tuple[float, float] | None) -> str | None:
+    if not settings.use_weather or coords is None:
+        return None
+    try:
+        return fetch_current_weather(coords[0], coords[1]).describe()
+    except Exception as exc:
+        logger.warning("Weather fetch failed: %s", exc)
+        return None
+
+
+def _birdnet_species(
+    settings: SettingsConfig, day_start: datetime, now: datetime
+) -> tuple[list[str], bool]:
+    """(species common names for the bird-day, reachable?) — high-confidence only."""
+    if not settings.birdnet_url:
+        return [], False
+    try:
+        species = [
+            c for _s, c in birdnet.birds_for_day(settings.birdnet_url, start=day_start, now=now)
+        ]
+    except Exception as exc:
+        logger.warning("BirdNET-Go species fetch failed: %s", exc)
+        return [], False
+    return species, True
+
+
+def _resolve_location(settings: SettingsConfig) -> LocationInfo:
+    """Location from the manual override, else read from BirdNET-Go; + a place name."""
+    coords, source = _resolve_coords(settings)
     return LocationInfo(
         latitude=coords[0] if coords else None,
         longitude=coords[1] if coords else None,
-        name=name,
+        name=_geocode_name(coords),
         source=source,
     )
 
@@ -344,29 +387,16 @@ def _compute_status() -> StatusResponse:
         has_enabled_tv=any(tv.enabled for tv in config.tvs),
     )
 
-    location = _resolve_location(settings)
-    weather_text: str | None = None
-    if settings.use_weather and location.latitude is not None and location.longitude is not None:
-        try:
-            weather_text = fetch_current_weather(location.latitude, location.longitude).describe()
-        except Exception as exc:
-            logger.warning("Weather fetch failed: %s", exc)
-
-    birdnet_connected = False
-    species: list[str] = []
-    if settings.birdnet_url:
-        try:
-            # Bird-day window (day_reset → now, crossing midnight), high-confidence
-            # only — low-confidence detections are dropped to avoid false positives.
-            species = [
-                common
-                for _sci, common in birdnet.birds_for_day(
-                    settings.birdnet_url, start=day_start, now=now
-                )
-            ]
-            birdnet_connected = True
-        except Exception as exc:
-            logger.warning("BirdNET-Go species fetch failed: %s", exc)
+    # BirdNET-Go is the slow part (~5s each for location + species), so run those two
+    # in parallel; the geocode + weather lookups are fast (and cached) and need the
+    # coordinates, so they follow once coords resolve.
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        coords_future = pool.submit(_resolve_coords, settings)
+        species_future = pool.submit(_birdnet_species, settings, day_start, now)
+        coords, _source = coords_future.result()
+        species, birdnet_connected = species_future.result()
+    location_name = _geocode_name(coords)
+    weather_text = _weather_text(settings, coords)
 
     return StatusResponse(
         now=now.isoformat(),
@@ -380,7 +410,7 @@ def _compute_status() -> StatusResponse:
         next_eligible_at=plan.eligible_at.isoformat() if plan.eligible_at else None,
         next_reason=plan.reason,
         weather=weather_text,
-        location_name=location.name,
+        location_name=location_name,
         birdnet_connected=birdnet_connected,
         species_today=species,
         last_generation=_to_log_entry(last) if last else None,

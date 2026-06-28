@@ -119,7 +119,7 @@ export function TvCard({ tv, onChange, onRemove }: TvCardProps) {
               onChange={(e) => {
                 onChange({ ip: e.target.value })
               }}
-              placeholder="192.168.1.219"
+              placeholder="192.168.1.50"
               className={`${controlClass} flex-1`}
             />
             <button

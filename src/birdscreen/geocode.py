@@ -8,10 +8,16 @@ https://operations.osmfoundation.org/policies/nominatim/
 
 from __future__ import annotations
 
+import os
+
 import requests
 
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/reverse"
-USER_AGENT = "BirdScreen/0.1 (https://github.com/follesoe/BirdScreen; jonas@follesoe.no)"
+# Nominatim's policy requires a descriptive User-Agent; deployers should set their own
+# contact via BIRDSCREEN_USER_AGENT (see https://operations.osmfoundation.org/policies/nominatim/).
+USER_AGENT = os.environ.get(
+    "BIRDSCREEN_USER_AGENT", "BirdScreen (+https://github.com/follesoe/BirdScreen)"
+)
 
 # Address keys to try, most-specific first, for a concise place label.
 _PLACE_KEYS = ("city", "town", "village", "municipality", "suburb", "county", "state")

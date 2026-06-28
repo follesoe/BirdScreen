@@ -46,7 +46,7 @@ logger = logging.getLogger(__name__)
 # silence the noisy "InsecureRequestWarning" that results.
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# Older Samsung Frames (e.g. the 2017 UE55LS003, firmware 2.0.x) close the Art
+# Older Samsung Frames (2017-era, Art API 1.x, firmware 2.0.x) close the Art
 # websocket with a reserved status code (1005); websocket-client >=1.9 raises
 # "Invalid close opcode 1005" and aborts otherwise-successful calls. Tolerate the
 # reserved 1004–1006/1015 codes so these TVs keep working.

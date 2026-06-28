@@ -25,30 +25,55 @@ function linkClasses({ isActive }: { isActive: boolean }): string {
     : `${base} text-ink-soft hover:bg-parchment hover:text-ink`
 }
 
-export function Sidebar() {
+interface SidebarProps {
+  open: boolean
+  onClose: () => void
+}
+
+export function Sidebar({ open, onClose }: SidebarProps) {
   const { t } = useTranslation()
+  // On phones the sidebar is an off-canvas drawer; from md up it's a static column.
+  const drawer = open ? 'translate-x-0' : '-translate-x-full'
   return (
-    <aside className="flex w-72 flex-col overflow-y-auto border-r border-bark/25 bg-parchment-deep">
-      <div className="px-4 pt-5 pb-4">
-        <img src={logoUrl} alt={t('app.title')} className="w-full" />
-        <div className="mt-4 text-center">
-          <p className="font-display text-4xl leading-none font-semibold text-ink">
-            {t('app.title')}
-          </p>
-          <p className="font-body text-base text-robin italic">{t('app.subtitle')}</p>
+    <>
+      {open ? (
+        <button
+          type="button"
+          aria-label={t('nav.close')}
+          onClick={onClose}
+          className="fixed inset-0 z-30 bg-ink/40 md:hidden"
+        />
+      ) : null}
+      <aside
+        className={`fixed inset-y-0 left-0 z-40 flex w-72 flex-col overflow-y-auto border-r border-bark/25 bg-parchment-deep transition-transform md:static md:z-auto md:translate-x-0 ${drawer}`}
+      >
+        <div className="px-4 pt-5 pb-4">
+          <img src={logoUrl} alt={t('app.title')} className="w-full" />
+          <div className="mt-4 text-center">
+            <p className="font-display text-4xl leading-none font-semibold text-ink">
+              {t('app.title')}
+            </p>
+            <p className="font-body text-base text-robin italic">{t('app.subtitle')}</p>
+          </div>
         </div>
-      </div>
-      <nav className="flex flex-col gap-1 px-3">
-        {NAV_ITEMS.map((item) => (
-          <NavLink key={item.to} to={item.to} end={item.to === '/'} className={linkClasses}>
-            <img src={item.icon} alt="" className="h-11 w-11 shrink-0" />
-            {t(item.labelKey)}
-          </NavLink>
-        ))}
-      </nav>
-      {/* Tree of Norwegian birds, top tucked under the last menu item. It's cut off
-          at the sidebar's bottom edge; scroll the sidebar to see the whole tree. */}
-      <img src={treeUrl} alt="" aria-hidden="true" className="mt-6 w-full shrink-0 select-none" />
-    </aside>
+        <nav className="flex flex-col gap-1 px-3">
+          {NAV_ITEMS.map((item) => (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              end={item.to === '/'}
+              onClick={onClose}
+              className={linkClasses}
+            >
+              <img src={item.icon} alt="" className="h-11 w-11 shrink-0" />
+              {t(item.labelKey)}
+            </NavLink>
+          ))}
+        </nav>
+        {/* Tree of Norwegian birds, top tucked under the last menu item. It's cut off
+            at the sidebar's bottom edge; scroll the sidebar to see the whole tree. */}
+        <img src={treeUrl} alt="" aria-hidden="true" className="mt-6 w-full shrink-0 select-none" />
+      </aside>
+    </>
   )
 }

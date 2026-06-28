@@ -7,7 +7,7 @@
 #   1. FastAPI (uvicorn --reload)  on http://<this-host>:8000  (API + built dist)
 #   2. Vite dev server (HMR)       on http://<this-host>:5173  (open THIS one)
 #
-# For live editing open the Vite URL (:5173) — e.g. http://jonas-macbook.local:5173 —
+# For live editing open the Vite URL (:5173) — e.g. http://my-server.local:5173 —
 # it hot-reloads and proxies /api → :8000. The :8000 URL serves the last `npm run
 # build` (rebuild to refresh it). Both bind 0.0.0.0 so they work over the LAN.
 # Ctrl-C stops both. Note: stop any other server using port 8000 first.

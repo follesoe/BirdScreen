@@ -15,6 +15,8 @@ export const en = {
     settings: 'Settings',
     schedule: 'Schedule',
     tvs: 'TVs',
+    open: 'Open menu',
+    close: 'Close menu',
   },
   gallery: {
     heading: 'Poster gallery',
@@ -90,7 +92,7 @@ export const en = {
     enabled: 'Update this TV (push new posters)',
     defaultName: 'Frame TV',
     ip: 'IP address',
-    ipHint: "The TV's local IP, e.g. 192.168.1.219.",
+    ipHint: "The TV's local IP, e.g. 192.168.1.50.",
     check: 'Check status',
     checking: 'Checking…',
     monitorArt: 'Only paint when the TV is in Art Mode (and watch for it)',

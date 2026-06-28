@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState, type TouchEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { api, type GenerationLogEntry } from '@/api/client'
@@ -28,6 +28,20 @@ export function Lightbox({ name, record, onClose, onPrev, onNext }: LightboxProp
   const [showPrompt, setShowPrompt] = useState(false)
   const [hanging, setHanging] = useState(false)
   const [sendMessage, setSendMessage] = useState<string | null>(null)
+  const touchStartX = useRef<number | null>(null)
+
+  const onTouchStart = (e: TouchEvent<HTMLDivElement>) => {
+    touchStartX.current = e.touches[0]?.clientX ?? null
+  }
+  const onTouchEnd = (e: TouchEvent<HTMLDivElement>) => {
+    const start = touchStartX.current
+    touchStartX.current = null
+    if (start === null) return
+    const dx = (e.changedTouches[0]?.clientX ?? start) - start
+    if (Math.abs(dx) < 50) return // ignore taps/tiny drags
+    if (dx < 0) onNext?.()
+    else onPrev?.()
+  }
   const promptText = record?.prompt ?? null
 
   const hang = () => {
@@ -90,6 +104,8 @@ export function Lightbox({ name, record, onClose, onPrev, onNext }: LightboxProp
       <div
         className="relative z-10 flex flex-col"
         style={{ width: 'min(76rem, calc(78vh * 16 / 9))' }}
+        onTouchStart={onTouchStart}
+        onTouchEnd={onTouchEnd}
       >
         <div className="mb-3 flex items-center gap-2">
           {sendMessage !== null ? (

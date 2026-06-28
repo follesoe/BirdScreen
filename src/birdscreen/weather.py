@@ -8,13 +8,17 @@ https://api.met.no/doc/TermsOfService
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 
 import requests
 
 MET_URL = "https://api.met.no/weatherapi/locationforecast/2.0/compact"
-# MET API etiquette: identify the app + a contact address.
-USER_AGENT = "BirdScreen/0.1 (https://github.com/follesoe/BirdScreen; jonas@follesoe.no)"
+# MET API etiquette: identify the app + a contact. Deployers should set their own
+# contact (their site or email) via BIRDSCREEN_USER_AGENT — see MET's Terms of Service.
+USER_AGENT = os.environ.get(
+    "BIRDSCREEN_USER_AGENT", "BirdScreen (+https://github.com/follesoe/BirdScreen)"
+)
 
 # Scene phrase for non-precipitation conditions.
 _WEATHER_SCENE = {
