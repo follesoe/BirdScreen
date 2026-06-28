@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import os
 import socket
+import threading
 from datetime import datetime
 from pathlib import Path
 
@@ -20,11 +21,12 @@ from fastapi.staticfiles import StaticFiles
 from PIL import Image
 from pydantic import BaseModel
 
-from birdscreen import birdnet, engine, state
+from birdscreen import birdnet, engine, generate, state
 from birdscreen.config import ScheduleConfig, SettingsConfig, TvConfig, load_config, save_config
 from birdscreen.geocode import reverse_geocode
+from birdscreen.images import prepare_for_frame
 from birdscreen.logging_config import recent_logs, setup_logging
-from birdscreen.samsung_tv import art_state, get_device_info
+from birdscreen.samsung_tv import art_state, get_device_info, replace_art
 from birdscreen.weather import fetch_current_weather
 
 logger = logging.getLogger(__name__)
@@ -35,6 +37,7 @@ FRONTEND_DIST = Path("frontend/dist")
 _IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp"}
 _THUMB_MAX = 480
 _SERVER_ERROR_STATUS = 500  # HTTP 5xx → treat the server as unhealthy
+_generation_lock = threading.Lock()  # prevents overlapping manual generations
 
 
 class PosterInfo(BaseModel):
@@ -93,6 +96,9 @@ class GenerationLogEntry(BaseModel):
     model: str
     image_size: str
     output: str | None
+    prompt: str | None
+    total_tokens: int | None
+    cost_usd: float | None
 
 
 class StatusResponse(BaseModel):
@@ -114,6 +120,20 @@ class StatusResponse(BaseModel):
     species_today: list[str]
     last_generation: GenerationLogEntry | None
     tvs: list[TvConfig]
+
+
+class GenerateResult(BaseModel):
+    """Outcome of a manual 'generate now' request."""
+
+    started: bool
+    message: str
+
+
+class SendResult(BaseModel):
+    """Outcome of hanging a poster on the configured Frame TV(s)."""
+
+    ok: bool
+    message: str
 
 
 def _parse_date(name: str) -> str | None:
@@ -164,6 +184,11 @@ def _thumbnail(name: str) -> Path:
 def _tv_token_file(ip: str) -> Path:
     """Per-TV Art-websocket token file (so multiple TVs don't clobber each other)."""
     return Path(f".tv-token-{ip.replace('.', '-').replace(':', '-')}")
+
+
+def _tv_art_file(ip: str) -> Path:
+    """Per-TV file caching the content_id of the poster currently hung on it."""
+    return Path(f".tv-art-{ip.replace('.', '-').replace(':', '-')}")
 
 
 def _tv_status(ip: str, *, pair: bool = False) -> TvStatus:
@@ -281,6 +306,9 @@ def _to_log_entry(record: state.GenerationRecord) -> GenerationLogEntry:
         model=record.model,
         image_size=record.image_size,
         output=record.output,
+        prompt=record.prompt,
+        total_tokens=record.total_tokens,
+        cost_usd=record.cost_usd,
     )
 
 
@@ -310,9 +338,14 @@ def _compute_status() -> StatusResponse:
     species: list[str] = []
     if settings.birdnet_url:
         try:
-            # High-confidence species only — low-confidence detections (e.g. a lone
-            # 0.65 sothøne) are intentionally dropped to avoid false positives.
-            species = birdnet.today_species(settings.birdnet_url)
+            # Bird-day window (day_reset → now, crossing midnight), high-confidence
+            # only — low-confidence detections are dropped to avoid false positives.
+            species = [
+                common
+                for _sci, common in birdnet.birds_for_day(
+                    settings.birdnet_url, start=day_start, now=now
+                )
+            ]
             birdnet_connected = True
         except Exception as exc:
             logger.warning("BirdNET-Go species fetch failed: %s", exc)
@@ -334,6 +367,76 @@ def _compute_status() -> StatusResponse:
         species_today=species,
         last_generation=_to_log_entry(last) if last else None,
         tvs=config.tvs,
+    )
+
+
+def _run_generation() -> None:
+    try:
+        record = generate.generate_now(trigger="manual", reason="Generated from the dashboard")
+        # Auto-hang the fresh poster on the enabled TV(s) + switch them to Art Mode.
+        if record.output:
+            result = _send_to_tvs(record.output, enabled_only=True)
+            logger.info("Auto-hang after generation: %s", result.message)
+    except Exception:
+        logger.exception("Manual generation failed")
+    finally:
+        _generation_lock.release()
+
+
+def _send_to_tvs(name: str, *, enabled_only: bool = False) -> SendResult:
+    """Hang ``name`` on the configured TVs, overwriting BirdScreen's previous poster.
+
+    With ``enabled_only`` the push is limited to TVs whose 'update' toggle is on — used
+    by automatic generation; the manual button targets all configured TVs.
+    """
+    poster = _safe_poster_path(name)
+    tvs = load_config().tvs
+    if enabled_only:
+        tvs = [tv for tv in tvs if tv.enabled]
+    if not tvs:
+        msg = (
+            "No TVs are enabled for updates."
+            if enabled_only
+            else "No Frame TVs are configured yet."
+        )
+        return SendResult(ok=False, message=msg)
+
+    Path("cache").mkdir(exist_ok=True)
+    frame_ready = prepare_for_frame(poster, dst=Path("cache/birdscreen.jpg"))
+
+    hung: list[str] = []
+    failed: list[str] = []
+    for tv in tvs:
+        art_file = _tv_art_file(tv.ip)
+        # BirdScreen's own last upload on this TV; only this is deleted, so the user's
+        # personal photos are never touched.
+        previous = art_file.read_text(encoding="utf-8").strip() if art_file.exists() else None
+        try:
+            content_id = replace_art(
+                tv.ip,
+                frame_ready,
+                token_file=str(_tv_token_file(tv.ip)),
+                previous_id=previous or None,
+            )
+            art_file.write_text(content_id, encoding="utf-8")
+            hung.append(tv.name)
+            logger.info("Hung %s on %s (content_id=%s)", name, tv.name, content_id)
+        except Exception as exc:
+            failed.append(f"{tv.name} ({exc})")
+            logger.warning("Could not hang %s on %s: %s", name, tv.name, exc)
+
+    if hung and not failed:
+        return SendResult(ok=True, message=f"Hung on {', '.join(hung)}.")
+    if hung:
+        return SendResult(
+            ok=True, message=f"Hung on {', '.join(hung)}; couldn't reach {', '.join(failed)}."
+        )
+    return SendResult(
+        ok=False,
+        message=(
+            f"Couldn't reach {', '.join(failed)}. "
+            "If the TV shows an 'Allow' popup, accept it with the remote and try again."
+        ),
     )
 
 
@@ -413,6 +516,17 @@ def create_app() -> FastAPI:
     @app.get("/api/generations")
     def generations() -> list[GenerationLogEntry]:
         return [_to_log_entry(record) for record in state.recent_generations(limit=50)]
+
+    @app.post("/api/generate")
+    def generate_now_endpoint() -> GenerateResult:
+        if not _generation_lock.acquire(blocking=False):
+            return GenerateResult(started=False, message="A generation is already in progress.")
+        threading.Thread(target=_run_generation, daemon=True).start()
+        return GenerateResult(started=True, message="Generation started.")
+
+    @app.post("/api/tvs/send")
+    def send_to_tvs_endpoint(name: str) -> SendResult:
+        return _send_to_tvs(name)
 
     if FRONTEND_DIST.is_dir():
         app.mount("/", StaticFiles(directory=FRONTEND_DIST, html=True), name="frontend")

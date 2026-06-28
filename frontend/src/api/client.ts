@@ -70,6 +70,9 @@ export interface GenerationLogEntry {
   model: string
   image_size: string
   output: string | null
+  prompt: string | null
+  total_tokens: number | null
+  cost_usd: number | null
 }
 
 export interface StatusResponse {
@@ -91,6 +94,16 @@ export interface StatusResponse {
   tvs: TvConfig[]
 }
 
+export interface GenerateResult {
+  started: boolean
+  message: string
+}
+
+export interface SendResult {
+  ok: boolean
+  message: string
+}
+
 async function getJson<T>(url: string): Promise<T> {
   const res = await fetch(url)
   if (!res.ok) {
@@ -105,6 +118,14 @@ async function putJson<T>(url: string, body: unknown): Promise<T> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   })
+  if (!res.ok) {
+    throw new Error(`${String(res.status)} ${res.statusText}`)
+  }
+  return (await res.json()) as T
+}
+
+async function postJson<T>(url: string): Promise<T> {
+  const res = await fetch(url, { method: 'POST' })
   if (!res.ok) {
     throw new Error(`${String(res.status)} ${res.statusText}`)
   }
@@ -131,4 +152,7 @@ export const api = {
   status: (): Promise<StatusResponse> => getJson<StatusResponse>('/api/status'),
   generations: (): Promise<GenerationLogEntry[]> =>
     getJson<GenerationLogEntry[]>('/api/generations'),
+  generate: (): Promise<GenerateResult> => postJson<GenerateResult>('/api/generate'),
+  sendToTv: (name: string): Promise<SendResult> =>
+    postJson<SendResult>(`/api/tvs/send?name=${encodeURIComponent(name)}`),
 }

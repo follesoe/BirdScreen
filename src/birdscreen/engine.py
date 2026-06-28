@@ -45,10 +45,23 @@ def windows_for_day(day: datetime, schedule: ScheduleConfig) -> list[ActiveWindo
 
 
 def active_window(now: datetime, schedule: ScheduleConfig) -> ActiveWindow | None:
-    """The active window containing ``now``, or None if outside all of them."""
+    """The active window containing ``now``, or None if outside all of them.
+
+    Handles windows that cross midnight (end <= start, e.g. 06:00 → 02:00): such a
+    window is still active early the next morning, until its end time.
+    """
     current = now.hour * 60 + now.minute
     for window in windows_for_day(now, schedule):
-        if _minutes(window.start) <= current <= _minutes(window.end):
+        start, end = _minutes(window.start), _minutes(window.end)
+        if end <= start:  # crosses midnight — the evening part, today
+            if current >= start:
+                return window
+        elif start <= current <= end:
+            return window
+    # a window opened yesterday may still be running past midnight into this morning
+    for window in windows_for_day(now - timedelta(days=1), schedule):
+        start, end = _minutes(window.start), _minutes(window.end)
+        if end <= start and current < end:
             return window
     return None
 

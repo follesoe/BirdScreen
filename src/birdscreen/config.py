@@ -54,6 +54,24 @@ class SettingsConfig(BaseModel):
     longitude: float | None = None
 
 
+class ModelCost(BaseModel):
+    """USD per 1,000,000 tokens for a model (for image models, ``output`` is the
+    image-token rate). Edit ``pricing`` in config.yaml to track current prices."""
+
+    input: float = 0.0
+    output: float = 0.0
+
+
+def _default_pricing() -> dict[str, ModelCost]:
+    # Defaults from https://ai.google.dev/gemini-api/docs/pricing — override in config.yaml.
+    return {
+        "gemini-3-pro-image": ModelCost(input=2.00, output=120.00),
+        "gemini-3.1-flash-image": ModelCost(input=0.50, output=60.00),
+        "gemini-2.5-flash-image": ModelCost(input=0.30, output=30.00),
+        "gemini-2.5-flash": ModelCost(input=0.30, output=2.50),
+    }
+
+
 class TvConfig(BaseModel):
     """A Samsung Frame TV that displays the posters."""
 
@@ -73,6 +91,8 @@ class BirdScreenConfig(BaseModel):
     schedule: ScheduleConfig = Field(default_factory=ScheduleConfig)
     settings: SettingsConfig = Field(default_factory=SettingsConfig)
     tvs: list[TvConfig] = Field(default_factory=list)
+    # USD per 1M tokens, per model — edit to keep token costs current.
+    pricing: dict[str, ModelCost] = Field(default_factory=_default_pricing)
 
 
 def load_config() -> BirdScreenConfig:

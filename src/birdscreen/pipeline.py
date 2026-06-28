@@ -120,7 +120,9 @@ def _finalize_image(request: PosterRequest, base: Path, raw: Path, orig_ext: str
 
         sr_tmp = base.with_suffix(".srtmp.png")
         super_resolve(original, model=request.upscale).save(sr_tmp)
-        final = base.with_name(f"{base.name}_upscaled-{_slug(request.upscale)}").with_suffix(".jpg")
+        final = explicit or base.with_name(
+            f"{base.name}_upscaled-{_slug(request.upscale)}"
+        ).with_suffix(".jpg")
         prepare_for_frame(sr_tmp, dst=final, size=size)
         sr_tmp.unlink(missing_ok=True)
         return final

@@ -18,20 +18,30 @@ DB_PATH = Path("data/birdscreen.db")
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS generations (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    created_at  TEXT NOT NULL,
-    trigger     TEXT NOT NULL,            -- 'bird' | 'time' | 'manual'
-    reason      TEXT,                     -- human-readable explanation
-    birds       TEXT NOT NULL,            -- JSON array of common names
-    location    TEXT,
-    season      TEXT,
-    weather     TEXT,
-    model       TEXT NOT NULL,
-    image_size  TEXT NOT NULL,
-    output      TEXT,                      -- poster filename
-    prompt      TEXT                       -- the full prompt sent to the image model
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at   TEXT NOT NULL,
+    trigger      TEXT NOT NULL,            -- 'bird' | 'time' | 'manual'
+    reason       TEXT,                     -- human-readable explanation
+    birds        TEXT NOT NULL,            -- JSON array of common names
+    location     TEXT,
+    season       TEXT,
+    weather      TEXT,
+    model        TEXT NOT NULL,
+    image_size   TEXT NOT NULL,
+    output       TEXT,                     -- poster filename
+    prompt       TEXT,                     -- the full prompt sent to the image model
+    total_tokens INTEGER,                  -- Gemini tokens used (image + text calls)
+    cost_usd     REAL                      -- estimated cost in USD at generation time
 );
 """
+
+# Additive migrations for databases created by an older schema — columns are added
+# with ALTER TABLE if missing, so existing history is preserved (never recreated).
+_ADDED_COLUMNS = {
+    "prompt": "TEXT",
+    "total_tokens": "INTEGER",
+    "cost_usd": "REAL",
+}
 
 
 @dataclass
@@ -48,8 +58,19 @@ class GenerationRecord:
     weather: str | None = None
     output: str | None = None
     prompt: str | None = None
+    total_tokens: int | None = None
+    cost_usd: float | None = None
     id: int = 0  # set on read
     created_at: str = ""  # ISO; defaults to now on insert
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Add any missing columns to a pre-existing table (preserving data)."""
+    existing = {row["name"] for row in conn.execute("PRAGMA table_info(generations)").fetchall()}
+    for column, sql_type in _ADDED_COLUMNS.items():
+        if column not in existing:
+            # column/type come from the internal _ADDED_COLUMNS constant, not user input
+            conn.execute(f"ALTER TABLE generations ADD COLUMN {column} {sql_type}")
 
 
 def _connect() -> sqlite3.Connection:
@@ -57,6 +78,7 @@ def _connect() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.execute(_SCHEMA)
+    _migrate(conn)
     return conn
 
 
@@ -76,6 +98,8 @@ def _row_to_record(row: sqlite3.Row) -> GenerationRecord:
         image_size=row["image_size"],
         output=row["output"],
         prompt=row["prompt"],
+        total_tokens=row["total_tokens"],
+        cost_usd=row["cost_usd"],
     )
 
 
@@ -86,7 +110,8 @@ def record_generation(record: GenerationRecord) -> int:
         cur = conn.execute(
             "INSERT INTO generations "
             "(created_at, trigger, reason, birds, location, season, weather, model, "
-            "image_size, output, prompt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "image_size, output, prompt, total_tokens, cost_usd) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 created,
                 record.trigger,
@@ -99,6 +124,8 @@ def record_generation(record: GenerationRecord) -> int:
                 record.image_size,
                 record.output,
                 record.prompt,
+                record.total_tokens,
+                record.cost_usd,
             ),
         )
         return int(cur.lastrowid or 0)

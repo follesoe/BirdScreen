@@ -18,11 +18,11 @@ USER_AGENT = "BirdScreen/0.1 (https://github.com/follesoe/BirdScreen; jonas@foll
 
 # Scene phrase for non-precipitation conditions.
 _WEATHER_SCENE = {
-    "clear": "clear skies",
+    "clear": "clear, cloudless skies",
+    "fair": "mostly clear skies with only a few high clouds",
     "partly_cloudy": "a few scattered clouds drifting across the sky",
     "cloudy": "an overcast, cloud-covered sky",
     "fog": "soft mist and fog hanging over the landscape",
-    "thunder": "dramatic dark storm clouds and distant lightning",
 }
 
 # Scene phrase for precipitation, keyed by (condition, intensity).
@@ -43,8 +43,9 @@ _PRECIP_SCENE = {
 class Weather:
     """A normalized snapshot of current conditions."""
 
-    condition: str  # clear, partly_cloudy, cloudy, fog, rain, sleet, snow, thunder
+    condition: str  # clear, fair, partly_cloudy, cloudy, fog, rain, sleet, snow
     intensity: str | None = None  # light | moderate | heavy (precipitation only)
+    thunder: bool = False  # thunderstorm (the MET "...andthunder" symbol variants)
     symbol_code: str | None = None  # raw MET code, e.g. "partlycloudy_day"
     temperature_c: float | None = None
     wind_speed_ms: float | None = None
@@ -57,19 +58,23 @@ class Weather:
             phrase = _PRECIP_SCENE.get((self.condition, intensity), f"{intensity} {self.condition}")
         else:
             phrase = _WEATHER_SCENE.get(self.condition, "fair weather")
+        if self.thunder:
+            phrase += ", with rumbles of thunder and flashes of lightning"
         if self.temperature_c is not None:
             phrase += f" (about {round(self.temperature_c)}°C)"
         return phrase
 
 
 # (keywords, condition), checked in order; anything unmatched is "clear".
+# Thunder is handled separately (a modifier), so "rainandthunder" still reads as rain.
+# Note: partlycloudy must precede cloudy (it contains the substring "cloudy").
 _SYMBOL_CONDITIONS: list[tuple[tuple[str, ...], str]] = [
-    (("thunder",), "thunder"),
     (("sleet",), "sleet"),
     (("snow",), "snow"),
     (("rain", "showers"), "rain"),
     (("fog",), "fog"),
-    (("partlycloudy", "fair"), "partly_cloudy"),
+    (("partlycloudy",), "partly_cloudy"),
+    (("fair",), "fair"),
     (("cloudy",), "cloudy"),
 ]
 
@@ -81,6 +86,11 @@ def normalize_symbol(symbol_code: str) -> str:
         if any(k in s for k in keywords):
             return condition
     return "clear"
+
+
+def has_thunder(symbol_code: str) -> bool:
+    """True for the MET '...andthunder' symbol variants."""
+    return "thunder" in symbol_code.lower()
 
 
 def precipitation_intensity(symbol_code: str) -> str | None:
@@ -123,6 +133,7 @@ def fetch_current_weather(lat: float, lon: float, *, timeout: float = 10) -> Wea
     return Weather(
         condition=normalize_symbol(symbol or "clearsky"),
         intensity=precipitation_intensity(symbol) if symbol else None,
+        thunder=has_thunder(symbol) if symbol else False,
         symbol_code=symbol,
         temperature_c=instant.get("air_temperature"),
         wind_speed_ms=instant.get("wind_speed"),

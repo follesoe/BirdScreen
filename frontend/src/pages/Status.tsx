@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api, type GenerationLogEntry, type StatusResponse } from '@/api/client'
+import { Lightbox } from '@/components/Lightbox'
 import { PageHeading } from '@/components/PageHeading'
 import { PageHero } from '@/components/PageHero'
+import { Button } from '@/components/form/Button'
 import { Section } from '@/components/form/Section'
 import statusHero from '@/assets/heroes/status.webp'
 import binocularsIcon from '@/assets/icons/binoculars.png'
@@ -44,6 +46,48 @@ export function Status() {
   const { t } = useTranslation()
   const [status, setStatus] = useState<StatusResponse | null>(null)
   const [history, setHistory] = useState<GenerationLogEntry[]>([])
+  const [busy, setBusy] = useState(false)
+  const [selectedIndex, setSelectedIndex] = useState<number | null>(null)
+
+  const generate = useCallback(() => {
+    setBusy(true)
+    void api
+      .generate()
+      .then((result) => {
+        if (!result.started) {
+          setBusy(false)
+          return
+        }
+        // Poll while it renders (~30–60s); refresh history + status as it lands.
+        let elapsed = 0
+        const id = setInterval(() => {
+          elapsed += 5
+          void api
+            .generations()
+            .then((g) => {
+              setHistory(g)
+            })
+            .catch(() => {
+              // ignore transient errors while polling
+            })
+          void api
+            .status()
+            .then((s) => {
+              setStatus(s)
+            })
+            .catch(() => {
+              // ignore transient errors while polling
+            })
+          if (elapsed >= 120) {
+            clearInterval(id)
+            setBusy(false)
+          }
+        }, 5000)
+      })
+      .catch(() => {
+        setBusy(false)
+      })
+  }, [])
 
   const load = useCallback(() => {
     void api
@@ -81,6 +125,8 @@ export function Status() {
     )
   }
 
+  const selectedEntry = selectedIndex !== null ? (history[selectedIndex] ?? null) : null
+
   const windowValue = status.in_active_window
     ? `${t('status.active')} · ${status.current_window ?? ''}`
     : status.next_window_start !== null
@@ -96,7 +142,16 @@ export function Status() {
 
   return (
     <section className="max-w-3xl">
-      <PageHero title={t('status.heading')} image={statusHero} intro={t('status.intro')} />
+      <PageHero
+        title={t('status.heading')}
+        image={statusHero}
+        intro={t('status.intro')}
+        action={
+          <Button onClick={generate} disabled={busy}>
+            {busy ? t('status.generating') : t('status.generateNow')}
+          </Button>
+        }
+      />
 
       <div className="flex flex-col gap-5">
         <Section title={t('status.nowTitle')} icon={binocularsIcon}>
@@ -137,7 +192,7 @@ export function Status() {
             <p className="text-ink-soft">{t('status.historyEmpty')}</p>
           ) : (
             <ul className="flex flex-col gap-3">
-              {history.map((g) => (
+              {history.map((g, index) => (
                 <li key={g.id} className="rounded-lg border border-bark/20 bg-parchment p-3">
                   <div className="flex items-baseline justify-between gap-3">
                     <span className="font-display text-lg text-ink">
@@ -152,15 +207,28 @@ export function Status() {
                   <p className="font-body text-xs text-ink-soft">
                     {[g.location, g.season, g.weather].filter(Boolean).join(' · ')}
                   </p>
+                  {g.total_tokens !== null || g.cost_usd !== null ? (
+                    <p className="font-body text-xs text-ink-soft">
+                      {[
+                        g.total_tokens !== null
+                          ? `${g.total_tokens.toLocaleString()} tokens`
+                          : null,
+                        g.cost_usd !== null ? `$${g.cost_usd.toFixed(4)}` : null,
+                      ]
+                        .filter(Boolean)
+                        .join(' · ')}
+                    </p>
+                  ) : null}
                   {g.output !== null ? (
-                    <a
-                      href={api.imageUrl(g.output)}
-                      target="_blank"
-                      rel="noreferrer"
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedIndex(index)
+                      }}
                       className="font-body text-sm text-robin hover:underline"
                     >
                       {t('status.viewPoster')}
-                    </a>
+                    </button>
                   ) : null}
                 </li>
               ))}
@@ -168,6 +236,30 @@ export function Status() {
           )}
         </Section>
       </div>
+
+      {selectedEntry !== null && selectedIndex !== null ? (
+        <Lightbox
+          name={selectedEntry.output ?? ''}
+          record={selectedEntry}
+          onClose={() => {
+            setSelectedIndex(null)
+          }}
+          onPrev={
+            selectedIndex > 0
+              ? () => {
+                  setSelectedIndex(selectedIndex - 1)
+                }
+              : undefined
+          }
+          onNext={
+            selectedIndex < history.length - 1
+              ? () => {
+                  setSelectedIndex(selectedIndex + 1)
+                }
+              : undefined
+          }
+        />
+      ) : null}
     </section>
   )
 }

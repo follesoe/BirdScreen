@@ -127,19 +127,23 @@ def _bird_line(bird: Bird) -> str:
     return f"  - {bird.common} ({bird.scientific})" if bird.common else f"  - {bird.scientific}"
 
 
-def _bird_blocks(ctx: PosterContext, bird_lines: str) -> tuple[str, str, str]:
-    """Return (title_block, bird_block, text_rule) for the labelled/unlabelled modes."""
+def _bird_blocks(ctx: PosterContext, bird_lines: str) -> tuple[str, str]:
+    """Return (bird_block, text_rule) for the labelled/unlabelled modes (no title)."""
     if ctx.labels:
-        title_block = f'\n\nTitle across the top in an elegant serif typeface: "{ctx.title}".'
         bird_block = (
             "\n\nFeature the following birds, each accurately and recognisably rendered to "
             "scale and arranged naturally within a single cohesive scene (perched on "
             "branches, resting on shoreline rocks, wading, or in flight as best suits each "
-            "species). Label each bird with a small serif caption: its common name in "
-            f"{ctx.language} on top, and beneath it its scientific (Latin) name in italics:\n"
-            f"{bird_lines}"
+            "species). Label each bird with a small serif caption placed directly beside or "
+            "just below that bird, right next to it in the scene — do NOT gather the names "
+            "into a list, key, legend or caption strip along the bottom or edge. Each "
+            f"caption shows the common name in {ctx.language} on top and the scientific "
+            f"(Latin) name beneath it in italics:\n{bird_lines}"
         )
-        return title_block, bird_block, "no text other than the title and the species labels."
+        return (
+            bird_block,
+            "no text except the small per-bird species labels — no title, heading or list.",
+        )
 
     bird_block = (
         "\n\nFeature the following birds, each accurately and recognisably rendered to "
@@ -150,10 +154,10 @@ def _bird_blocks(ctx: PosterContext, bird_lines: str) -> tuple[str, str, str]:
         "species names, no labels, no letters or numbers anywhere in the image. Paint "
         "only the birds and the natural scenery. Compose it as a centred natural-history "
         "illustration with comfortable empty margin around all four edges, keeping the "
-        "birds and key scenery well inside the frame (the title and species labels are "
-        "added separately afterwards, around the artwork)."
+        "birds and key scenery well inside the frame (the species labels are added "
+        "separately afterwards, around the artwork)."
     )
-    return "", bird_block, "absolutely no text, letters or numbers of any kind."
+    return bird_block, "absolutely no text, letters or numbers of any kind."
 
 
 def build_prompt(ctx: PosterContext, env: SeasonInfo) -> str:
@@ -162,24 +166,43 @@ def build_prompt(ctx: PosterContext, env: SeasonInfo) -> str:
     weather_phrase = ctx.weather.describe() if ctx.weather else "calm, fair weather"
     place = ctx.location_name or f"the area at {ctx.latitude:.4f}, {ctx.longitude:.4f}"
     date_str = f"{ctx.when.day} {ctx.when:%B %Y}"
+    time_str = f"{ctx.when:%H:%M}"
     bird_lines = "\n".join(_bird_line(b) for b in ctx.birds)
     # Lowercase the season's first letter so it reads "It is mid-summer ...".
     season = (env.season[:1].lower() + env.season[1:]) if env.season else env.season
 
     setting = (
         f"Setting: the natural scenery around {place} — {env.scenery}. It is {season} "
-        f"({date_str}); render the vegetation accordingly — {env.foliage}. The weather is "
-        f"{weather_phrase}, lit by {env.light}. Keep the foliage, scenery and sky "
-        "botanically and seasonally accurate for this place and time of year."
+        f"({date_str}), and the local time is {time_str}. The daylight right now is "
+        f"{env.light}. Render the vegetation accordingly — {env.foliage}. The weather is "
+        f"{weather_phrase}. CRUCIAL — the lighting must match this exact time of day and "
+        "season: the sky colour, the height and warmth of the sun, the direction and length "
+        "of shadows, and the overall brightness should all clearly read as this hour at this "
+        "latitude (a luminous low-sun glow on long summer evenings, bright overhead midday "
+        "light, dim blue twilight, or near-dark night, as appropriate). Keep the foliage, "
+        "scenery and sky botanically and seasonally accurate for this place and time."
     )
-    title_block, bird_block, text_rule = _bird_blocks(ctx, bird_lines)
-    composition = (
-        "\n\nComposition: a calm, balanced field-guide plate on a soft parchment-toned "
-        "background, with the birds as the clear focus and natural foliage framing the "
-        "edges. Fine, detailed linework with gentle watercolor washes; no harsh outlines, "
-        f"no photographic realism, {text_rule}"
-    )
-    return f"Create a {aspect} {ctx.style}.\n\n{setting}{title_block}{bird_block}{composition}"
+    bird_block, text_rule = _bird_blocks(ctx, bird_lines)
+    if ctx.labels:
+        # Full-bleed immersive scene (the painted poster shown on the Frame): the
+        # scenery runs off all four edges with no border — the early-poster look.
+        composition = (
+            "\n\nComposition: one immersive watercolour scene that fills the entire frame. "
+            "The landscape, foliage and sky must run right to and softly bleed off all four "
+            "edges, the washes feathering organically into the paper at the margins. Use NO "
+            "border, frame, panel, plate outline, vignette or clean rectangular margin — "
+            "nothing should box the scene in; the artwork goes edge to edge. The birds are "
+            "the clear focus among the natural foliage. Fine, detailed linework with gentle "
+            f"watercolor washes; no harsh outlines, no photographic realism, {text_rule}"
+        )
+    else:
+        composition = (
+            "\n\nComposition: a calm, balanced field-guide plate on a soft parchment-toned "
+            "background, with the birds as the clear focus and natural foliage framing the "
+            "edges. Fine, detailed linework with gentle watercolor washes; no harsh "
+            f"outlines, no photographic realism, {text_rule}"
+        )
+    return f"Create a {aspect} {ctx.style}.\n\n{setting}{bird_block}{composition}"
 
 
 def build_daily_prompt(

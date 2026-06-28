@@ -53,10 +53,10 @@ _ENV = SeasonInfo(
 )
 
 
-def test_build_prompt_labelled_includes_birds_and_title() -> None:
+def test_build_prompt_labelled_includes_birds_no_title() -> None:
     prompt = build_prompt(_ctx(labels=True), _ENV)
     assert "Skjære (Pica pica)" in prompt
-    assert "Hørt i dag" in prompt
+    assert "Hørt i dag" not in prompt  # title removed — only species labels remain
     assert "16:9" in prompt
 
 

@@ -63,5 +63,6 @@ node_modules/
 # Runtime config (per-deployment; the web UI writes it)
 config.yaml
 
-# Samsung TV auth token (paired per-device; not shared)
+# Samsung TV auth token + per-TV current-art id (paired/per-device; not shared)
 .tv-token*
+.tv-art*

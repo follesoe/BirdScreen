@@ -27,6 +27,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import json
+import logging
 import os
 import socket
 import sys
@@ -34,13 +35,25 @@ from pathlib import Path
 from typing import Any
 
 import urllib3
-from samsungtvws import SamsungTVWS, exceptions
+import websocket._abnf as _ws_abnf
+from samsungtvws import SamsungTVWS
 
 from birdscreen.images import prepare_for_frame
+
+logger = logging.getLogger(__name__)
 
 # The Frame uses a self-signed cert on its secure websocket/REST endpoint;
 # silence the noisy "InsecureRequestWarning" that results.
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+# Older Samsung Frames (e.g. the 2017 UE55LS003, firmware 2.0.x) close the Art
+# websocket with a reserved status code (1005); websocket-client >=1.9 raises
+# "Invalid close opcode 1005" and aborts otherwise-successful calls. Tolerate the
+# reserved 1004–1006/1015 codes so these TVs keep working.
+_orig_is_valid_close = _ws_abnf.ABNF._is_valid_close_status
+_ws_abnf.ABNF._is_valid_close_status = staticmethod(  # type: ignore[method-assign]
+    lambda code: bool(_orig_is_valid_close(code)) or code in {1004, 1005, 1006, 1015}
+)
 
 # Secure websocket port used by The Frame for the Art API.
 ART_WS_PORT = 8002
@@ -256,15 +269,24 @@ def upload_image(
     Returns the ``content_id`` assigned by the TV. Connecting may trigger the
     TV's "Allow" popup if the device is not already paired (token cached).
     """
-    tv = SamsungTVWS(host=host, port=ART_WS_PORT, token_file=token_file, name=CLIENT_NAME)
-    art: Any = tv.art()
     data = Path(image_path).read_bytes()
+
+    def _connect() -> Any:
+        return SamsungTVWS(
+            host=host, port=ART_WS_PORT, token_file=token_file, name=CLIENT_NAME
+        ).art()
+
+    art = _connect()
     try:
         content_id = art.upload(data, file_type=file_type, matte=matte)
-    except exceptions.ResponseError:
-        # Older Frames (e.g. the 2017 first-gen, Art API 1.x) reject the modern
-        # D2D-socket upload ("send_image ... error number -1"). Fall back to the
-        # single-frame WebSocket-binary upload path, which those models accept.
+    except Exception as exc:
+        # Older Frames (e.g. the 2017 first-gen, Art API 1.07) reject the modern
+        # D2D-socket upload — sometimes with a clean ResponseError, sometimes by just
+        # dropping the websocket ("Invalid close opcode 1005"). Either way, fall back
+        # to the single-frame WebSocket-binary path those models accept, on a fresh
+        # connection (the failed socket may be half-closed).
+        logger.info("Modern art upload failed (%s); using WS-binary fallback.", exc)
+        art = _connect()
         content_id = _upload_ws_binary(art, data, file_type=file_type, matte=matte)
     if show:
         art.select_image(content_id, show=True)
@@ -274,6 +296,39 @@ def upload_image(
         with contextlib.suppress(Exception):
             art.set_artmode(True)
     return str(content_id)
+
+
+def replace_art(
+    host: str,
+    image_path: str | Path,
+    *,
+    token_file: str,
+    previous_id: str | None = None,
+    file_type: str = "jpg",
+    matte: str = "none",
+) -> str:
+    """Upload + display ``image_path``, then delete BirdScreen's previously-hung poster.
+
+    Returns the new ``content_id``. Only ``previous_id`` — BirdScreen's own last upload,
+    tracked per-TV — is removed, so the TV holds just the current poster (no queue) and
+    the user's other photos are never touched.
+    """
+    new_id = upload_image(
+        host,
+        image_path,
+        token_file=token_file,
+        file_type=file_type,
+        matte=matte,
+        show=True,
+        art_mode=True,
+    )
+    if previous_id and previous_id != new_id:
+        with contextlib.suppress(Exception):
+            art: Any = SamsungTVWS(
+                host=host, port=ART_WS_PORT, token_file=token_file, name=CLIENT_NAME
+            ).art()
+            art.delete(previous_id)
+    return new_id
 
 
 def upload_main() -> None:
