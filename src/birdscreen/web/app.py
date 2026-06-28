@@ -519,6 +519,7 @@ def _tick() -> None:
         if plan.state == "ready"
         else set()
     )
+    logger.info("Scheduler tick: %s — %d new species to paint", plan.state, len(new_species))
     if not new_species:  # not eligible, nothing heard, or nothing new since the last poster
         _scheduler.pending_since = None
         return
