@@ -3,6 +3,7 @@ export const en = {
     title: 'BirdScreen',
     subtitle: 'heard, painted, shown',
     tagline: 'Made with feathers, watercolour & AI.',
+    github: 'follesoe/BirdScreen',
   },
   common: {
     save: 'Save',
