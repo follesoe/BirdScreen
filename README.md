@@ -119,7 +119,7 @@ nothing is generated). The UI is mobile-friendly (drawer nav, swipeable gallery)
 
 Written/read by the web UI; missing file → sensible defaults. Top-level sections:
 
-- **`schedule`** — `day_reset`, `daily_cap`, `debounce_minutes`, `min_spacing_minutes`, and `weekday_windows` / `weekend_windows` (each `start`/`end`, may cross midnight).
+- **`schedule`** — `day_reset`, `daily_cap`, `debounce_minutes`, `min_spacing_minutes`, `weekday_windows` / `weekend_windows` (each `start`/`end`, may cross midnight), and `light_refresh` (repaint at **midday / evening / dusk** to track changing light + weather even when no new birds arrive — sun times computed offline with [`astral`](https://github.com/sffjunkie/astral), bounded by the cap/spacing).
 - **`settings`** — `model`, `image_size`, `upscale`, `birdnet_url`, `use_weather`, optional `latitude`/`longitude`.
 - **`tvs`** — list of `{ name, ip, enabled, monitor_art_mode }`.
 - **`pricing`** — per model `{ input, output }` USD per 1M tokens; used to record each generation's estimated cost. **Edit these to keep token prices current.**

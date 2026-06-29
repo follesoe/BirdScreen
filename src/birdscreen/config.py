@@ -31,6 +31,7 @@ class ScheduleConfig(BaseModel):
     daily_cap: int = 12  # hard ceiling on generations per day
     debounce_minutes: int = 15  # batch a burst of new species into one render
     min_spacing_minutes: int = 30  # minimum gap between renders
+    light_refresh: bool = True  # also repaint at midday/evening/dusk for light + weather
     weekday_windows: list[ActiveWindow] = Field(
         default_factory=lambda: [
             ActiveWindow(start="06:00", end="09:00"),

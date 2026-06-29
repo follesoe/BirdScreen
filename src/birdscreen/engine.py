@@ -8,13 +8,52 @@ status page just *shows* them.
 
 from __future__ import annotations
 
+import contextlib
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta, tzinfo
+
+from astral import Observer
+from astral.sun import noon, sunset
 
 from birdscreen.config import ActiveWindow, ScheduleConfig
 
 _SATURDAY = 5  # datetime.weekday(): Mon=0 … Sat=5, Sun=6
 _DAY_MINUTES = 24 * 60
+# "Evening" warm-light moment, this long before sunset.
+_EVENING_BEFORE_SUNSET = timedelta(minutes=90)
+
+
+def key_moments(latitude: float, longitude: float, day: date, tz: tzinfo) -> dict[str, datetime]:
+    """Local (naive) sun-driven refresh times for ``day``: midday, evening, dusk.
+
+    Computed offline with ``astral`` (no network/models). Defensive: at high latitudes
+    some don't exist (midnight sun / polar night) and are simply omitted.
+    """
+    observer = Observer(latitude=latitude, longitude=longitude)
+    moments: dict[str, datetime] = {}
+    with contextlib.suppress(Exception):
+        moments["midday"] = noon(observer, day, tzinfo=tz).replace(tzinfo=None)
+    with contextlib.suppress(Exception):
+        sunset_local = sunset(observer, day, tzinfo=tz).replace(tzinfo=None)
+        moments["evening"] = sunset_local - _EVENING_BEFORE_SUNSET
+        moments["dusk"] = sunset_local
+    return moments
+
+
+def due_refresh(
+    latitude: float,
+    longitude: float,
+    now: datetime,
+    last_generation_at: datetime | None,
+    tz: tzinfo,
+) -> str | None:
+    """Latest sun key-moment already passed today that hasn't been painted since, else None."""
+    moments = key_moments(latitude, longitude, now.date(), tz)
+    due: str | None = None
+    for name, moment in sorted(moments.items(), key=lambda kv: kv[1]):
+        if moment <= now and (last_generation_at is None or last_generation_at < moment):
+            due = name
+    return due
 
 
 def _minutes(value: str) -> int:

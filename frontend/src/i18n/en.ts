@@ -65,6 +65,12 @@ export const en = {
     speciesToday: 'Birds heard today',
     nextTitle: 'Next poster',
     eligibleAt: 'Eligible at',
+    lightRefresh: 'Next light refresh',
+    lightKind: {
+      midday: 'Midday',
+      evening: 'Evening',
+      dusk: 'Dusk',
+    },
     generationsToday: 'Posters today',
     willInclude: 'Will include',
     tvsTitle: 'Frame TVs',

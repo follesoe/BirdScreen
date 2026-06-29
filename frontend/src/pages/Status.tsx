@@ -180,6 +180,12 @@ export function Status() {
           <p className="mt-3 font-body text-ink-soft">{status.next_reason}</p>
           <dl className="mt-3">
             <Row label={t('status.eligibleAt')} value={fmtTime(status.next_eligible_at)} />
+            {status.next_light_refresh !== null && status.next_light_refresh_kind !== null ? (
+              <Row
+                label={t('status.lightRefresh')}
+                value={`${t(`status.lightKind.${status.next_light_refresh_kind}`)} · ${fmtTime(status.next_light_refresh)}`}
+              />
+            ) : null}
             <Row
               label={t('status.generationsToday')}
               value={`${String(status.generations_today)} / ${String(status.daily_cap)}`}

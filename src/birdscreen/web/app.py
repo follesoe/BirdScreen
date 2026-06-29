@@ -42,7 +42,7 @@ _SERVER_ERROR_STATUS = 500  # HTTP 5xx → treat the server as unhealthy
 _generation_lock = threading.Lock()  # prevents overlapping manual/auto generations
 _geocode_cache: dict[tuple[float, float], str | None] = {}  # coords → place name (stable)
 _coords_cache: dict[str, tuple[float, float] | None] = {}  # birdnet_url → lat/lon (stable)
-_SCHEDULER_INTERVAL_S = 60  # how often the auto-generation loop re-checks the rules
+_SCHEDULER_INTERVAL_S = 120  # how often the auto-generation loop re-checks the rules
 
 
 class _SchedulerState:
@@ -129,6 +129,8 @@ class StatusResponse(BaseModel):
     next_state: str
     next_eligible_at: str | None
     next_reason: str
+    next_light_refresh: str | None
+    next_light_refresh_kind: str | None
     weather: str | None
     location_name: str | None
     birdnet_connected: bool
@@ -398,6 +400,20 @@ def _compute_status() -> StatusResponse:
     location_name = _geocode_name(coords)
     weather_text = _weather_text(settings, coords)
 
+    # The next sun-driven light/weather refresh still to come today (if enabled).
+    light_at: str | None = None
+    light_kind: str | None = None
+    tz = now.astimezone().tzinfo
+    if schedule.light_refresh and coords is not None and tz is not None:
+        upcoming_moments = sorted(
+            (moment, name)
+            for name, moment in engine.key_moments(coords[0], coords[1], now.date(), tz).items()
+            if moment > now
+        )
+        if upcoming_moments:
+            light_at = upcoming_moments[0][0].isoformat()
+            light_kind = upcoming_moments[0][1]
+
     return StatusResponse(
         now=now.isoformat(),
         bird_day_start=day_start.isoformat(),
@@ -409,6 +425,8 @@ def _compute_status() -> StatusResponse:
         next_state=plan.state,
         next_eligible_at=plan.eligible_at.isoformat() if plan.eligible_at else None,
         next_reason=plan.reason,
+        next_light_refresh=light_at,
+        next_light_refresh_kind=light_kind,
         weather=weather_text,
         location_name=location_name,
         birdnet_connected=birdnet_connected,
@@ -418,15 +436,22 @@ def _compute_status() -> StatusResponse:
     )
 
 
-def _run_generation() -> None:
+def _run_generation_locked(trigger: str, reason: str) -> None:
+    """Generate one poster and auto-hang it on the enabled TV(s).
+
+    The single choke point for *all* generation (manual + scheduler). The caller MUST
+    already hold ``_generation_lock``; this releases it. Because every path acquires
+    that lock first, two generations can never run at the same time.
+    """
+    _scheduler.pending_since = None
     try:
-        record = generate.generate_now(trigger="manual", reason="Generated from the dashboard")
-        # Auto-hang the fresh poster on the enabled TV(s) + switch them to Art Mode.
+        logger.info("Generating (%s) — %s", trigger, reason)
+        record = generate.generate_now(trigger=trigger, reason=reason)
         if record.output:
             result = _send_to_tvs(record.output, enabled_only=True)
-            logger.info("Auto-hang after generation: %s", result.message)
+            logger.info("Hung %s — %s", record.output, result.message)
     except Exception:
-        logger.exception("Manual generation failed")
+        logger.exception("Generation failed (%s)", trigger)
     finally:
         _generation_lock.release()
 
@@ -488,21 +513,12 @@ def _send_to_tvs(name: str, *, enabled_only: bool = False) -> SendResult:
     )
 
 
-def _auto_generate(reason: str, trigger: str, new_species: set[str]) -> None:
-    """Render + hang one poster automatically (skips if a generation is in flight)."""
+def _auto_generate(trigger: str, reason: str) -> None:
+    """Acquire the generation lock and run one generation; skip if one is already running."""
     if not _generation_lock.acquire(blocking=False):
-        return  # a manual or auto generation is already running
-    _scheduler.pending_since = None
-    try:
-        logger.info("Scheduler: auto-generating (%s) — %s", trigger, ", ".join(sorted(new_species)))
-        record = generate.generate_now(trigger=trigger, reason=reason)
-        if record.output:
-            result = _send_to_tvs(record.output, enabled_only=True)
-            logger.info("Scheduler: hung %s — %s", record.output, result.message)
-    except Exception:
-        logger.exception("Scheduler: auto-generation failed")
-    finally:
-        _generation_lock.release()
+        logger.info("Scheduler: skipping (%s) — a generation is already running", trigger)
+        return
+    _run_generation_locked(trigger, reason)
 
 
 def _species_to_paint(
@@ -544,34 +560,43 @@ def _tick() -> None:
         has_enabled_tv=any(tv.enabled for tv in config.tvs),
     )
 
-    new_species = (
-        _species_to_paint(settings, day_start, now, last, last_at)
-        if plan.state == "ready"
-        else set()
-    )
-    logger.info("Scheduler tick: %s — %d new species to paint", plan.state, len(new_species))
-    if not new_species:  # not eligible, nothing heard, or nothing new since the last poster
+    if plan.state != "ready":
+        logger.info("Scheduler tick: %s", plan.state)
         _scheduler.pending_since = None
         return
 
-    # Debounce: wait debounce_minutes after first seeing new species, to batch a burst.
-    if _scheduler.pending_since is None:
-        _scheduler.pending_since = now
-        logger.info(
-            "Scheduler: %d new species — debouncing %d min",
-            len(new_species),
-            schedule.debounce_minutes,
-        )
+    new_species = _species_to_paint(settings, day_start, now, last, last_at)
+    logger.info("Scheduler tick: ready — %d new species", len(new_species))
+
+    # New species → debounce a burst, then paint (bird trigger).
+    if new_species:
+        if _scheduler.pending_since is None:
+            _scheduler.pending_since = now
+            logger.info(
+                "Scheduler: %d new species — debouncing %d min",
+                len(new_species),
+                schedule.debounce_minutes,
+            )
+            return
+        if (now - _scheduler.pending_since).total_seconds() >= schedule.debounce_minutes * 60:
+            first_today = last is None or last_at is None or last_at < day_start
+            trigger = "time" if first_today else "bird"
+            reason = (
+                "First poster of the day"
+                if first_today
+                else f"New birds heard: {', '.join(sorted(new_species))}"
+            )
+            _auto_generate(trigger, reason)
         return
-    if (now - _scheduler.pending_since).total_seconds() >= schedule.debounce_minutes * 60:
-        first_today = last is None or last_at is None or last_at < day_start
-        trigger = "time" if first_today else "bird"
-        reason = (
-            "First poster of the day"
-            if first_today
-            else f"New birds heard: {', '.join(sorted(new_species))}"
-        )
-        _auto_generate(reason, trigger, new_species)
+
+    # No new species → repaint at a sun key-moment to refresh light + weather.
+    _scheduler.pending_since = None
+    coords, _src = _resolve_coords(settings)
+    tz = now.astimezone().tzinfo
+    if schedule.light_refresh and coords is not None and tz is not None:
+        due = engine.due_refresh(coords[0], coords[1], now, last_at, tz)
+        if due:
+            _auto_generate("time", f"{due.capitalize()} light & weather refresh")
 
 
 def _scheduler_loop() -> None:
@@ -674,7 +699,11 @@ def create_app() -> FastAPI:
     def generate_now_endpoint() -> GenerateResult:
         if not _generation_lock.acquire(blocking=False):
             return GenerateResult(started=False, message="A generation is already in progress.")
-        threading.Thread(target=_run_generation, daemon=True).start()
+        threading.Thread(
+            target=_run_generation_locked,
+            args=("manual", "Generated from the dashboard"),
+            daemon=True,
+        ).start()
         return GenerateResult(started=True, message="Generation started.")
 
     @app.post("/api/tvs/send")

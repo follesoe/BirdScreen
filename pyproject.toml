@@ -9,6 +9,7 @@ authors = [
 license = "MIT"
 requires-python = ">=3.13"
 dependencies = [
+    "astral>=3.2",  # sun times (solar noon / golden hour / dusk) for time-based refreshes
     "google-genai>=2.10.0",
     "pillow>=12.2.0",
     "python-dotenv>=1.2.2",
