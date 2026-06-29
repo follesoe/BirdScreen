@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api, type TvConfig, type TvStatus } from '@/api/client'
+import { StatusError } from '@/components/StatusError'
 import { Field } from '@/components/form/Field'
 import { Toggle } from '@/components/form/Toggle'
 import { controlClass } from '@/components/form/styles'
@@ -20,7 +21,7 @@ function StatusView({ status }: { status: TvStatus | 'loading' }) {
   if (!status.connected) {
     return (
       <div className="rounded-lg border border-robin/40 bg-robin/5 p-3 text-sm">
-        <p className="text-robin">{status.message ?? t('tvs.unreachable')}</p>
+        <StatusError message={status.message ?? t('tvs.unreachable')} detail={status.detail} />
         <p className="mt-1 text-ink-soft">{t('tvs.pairingHint')}</p>
       </div>
     )

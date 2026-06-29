@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { api, type BirdnetStatus } from '@/api/client'
+import { api, type BirdnetStatus, type StorageInfo } from '@/api/client'
 import { PageHeading } from '@/components/PageHeading'
 import { PageHero } from '@/components/PageHero'
+import { StatusError } from '@/components/StatusError'
 import { Field } from '@/components/form/Field'
 import { SaveButton } from '@/components/form/SaveButton'
 import { Section } from '@/components/form/Section'
@@ -12,6 +13,7 @@ import { useEditableConfig } from '@/hooks/useEditableConfig'
 import settingsHero from '@/assets/heroes/settings.webp'
 import aiIcon from '@/assets/icons/ai.png'
 import birdnetIcon from '@/assets/icons/birdnet.png'
+import storageIcon from '@/assets/icons/storage.png'
 import weatherIcon from '@/assets/icons/weather.png'
 
 const MODELS = ['gemini-3-pro-image', 'gemini-2.5-flash-image']
@@ -23,9 +25,31 @@ function BirdnetStatusLine({ status }: { status: BirdnetStatus | 'loading' }) {
     return <p className="text-sm text-ink-soft">{t('settings.birdnetChecking')}</p>
   }
   if (!status.connected) {
-    return <p className="text-sm text-robin">{status.message ?? t('settings.birdnetError')}</p>
+    return (
+      <div className="text-sm">
+        <StatusError
+          message={status.message ?? t('settings.birdnetError')}
+          detail={status.detail}
+        />
+      </div>
+    )
   }
   return <p className="text-sm text-sage">{t('settings.birdnetOk')}</p>
+}
+
+function fmtBytes(bytes: number): string {
+  if (bytes >= 1_048_576) return `${(bytes / 1_048_576).toFixed(1)} MB`
+  if (bytes >= 1024) return `${(bytes / 1024).toFixed(0)} KB`
+  return `${String(bytes)} B`
+}
+
+function StorageRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex justify-between gap-4 border-b border-bark/15 py-1.5 last:border-0">
+      <dt className="font-body text-ink-soft">{label}</dt>
+      <dd className="text-right font-body break-all text-ink">{value}</dd>
+    </div>
+  )
 }
 
 export function Settings() {
@@ -58,6 +82,18 @@ export function Settings() {
       clearTimeout(id)
     }
   }, [checkBirdnet])
+
+  const [storage, setStorage] = useState<StorageInfo | null>(null)
+  useEffect(() => {
+    void api
+      .storage()
+      .then((s) => {
+        setStorage(s)
+      })
+      .catch(() => {
+        // best-effort
+      })
+  }, [])
 
   if (config === null) {
     return (
@@ -160,6 +196,26 @@ export function Settings() {
             }}
           />
         </Section>
+
+        {storage !== null ? (
+          <Section
+            title={t('settings.storageTitle')}
+            description={t('settings.storageDesc')}
+            icon={storageIcon}
+          >
+            <dl className="flex flex-col">
+              <StorageRow
+                label={t('settings.storagePosters')}
+                value={`${fmtBytes(storage.posters_bytes)} · ${String(storage.posters_count)} ${t('settings.storageFiles')}`}
+              />
+              <StorageRow
+                label={t('settings.storageDatabase')}
+                value={fmtBytes(storage.database_bytes)}
+              />
+              <StorageRow label={t('settings.storagePath')} value={storage.working_dir} />
+            </dl>
+          </Section>
+        ) : null}
       </div>
     </section>
   )

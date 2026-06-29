@@ -49,6 +49,7 @@ export interface TvStatus {
   paired: boolean
   token_auth: boolean
   message: string | null
+  detail: string | null
 }
 
 export interface BirdnetStatus {
@@ -56,6 +57,14 @@ export interface BirdnetStatus {
   status_code: number | null
   server: string | null
   message: string | null
+  detail: string | null
+}
+
+export interface StorageInfo {
+  working_dir: string
+  posters_bytes: number
+  posters_count: number
+  database_bytes: number
 }
 
 export interface GenerationLogEntry {
@@ -137,6 +146,7 @@ async function postJson<T>(url: string): Promise<T> {
 export const api = {
   posters: (): Promise<PosterInfo[]> => getJson<PosterInfo[]>('/api/posters'),
   logs: (): Promise<LogsResponse> => getJson<LogsResponse>('/api/logs'),
+  storage: (): Promise<StorageInfo> => getJson<StorageInfo>('/api/storage'),
   thumbUrl: (name: string): string => `/api/posters/${encodeURIComponent(name)}/thumb`,
   imageUrl: (name: string): string => `/api/posters/${encodeURIComponent(name)}/image`,
   schedule: (): Promise<ScheduleConfig> => getJson<ScheduleConfig>('/api/config/schedule'),

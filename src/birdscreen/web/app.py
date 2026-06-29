@@ -77,6 +77,7 @@ class TvStatus(BaseModel):
     paired: bool = False  # we have a cached Art-websocket token for this TV
     token_auth: bool = False
     message: str | None = None
+    detail: str | None = None  # full error text (shown behind a "details" toggle)
 
 
 class BirdnetStatus(BaseModel):
@@ -86,6 +87,7 @@ class BirdnetStatus(BaseModel):
     status_code: int | None = None
     server: str | None = None  # the Server response header, if any
     message: str | None = None
+    detail: str | None = None  # full error text (shown behind a "details" toggle)
 
 
 class LocationInfo(BaseModel):
@@ -151,6 +153,37 @@ class SendResult(BaseModel):
 
     ok: bool
     message: str
+
+
+class StorageInfo(BaseModel):
+    """Disk usage and where BirdScreen is running from."""
+
+    working_dir: str
+    posters_bytes: int
+    posters_count: int
+    database_bytes: int
+
+
+def _storage_info() -> StorageInfo:
+    """Poster-folder + database sizes and the current working directory."""
+    posters_bytes = posters_count = 0
+    if POSTERS_DIR.is_dir():
+        for path in POSTERS_DIR.iterdir():
+            if path.is_file() and path.suffix.lower() in _IMAGE_SUFFIXES:
+                posters_bytes += path.stat().st_size
+                posters_count += 1
+    db_dir = state.DB_PATH.parent
+    db_bytes = (
+        sum(p.stat().st_size for p in db_dir.glob(f"{state.DB_PATH.name}*") if p.is_file())
+        if db_dir.is_dir()
+        else 0
+    )
+    return StorageInfo(
+        working_dir=str(Path.cwd()),
+        posters_bytes=posters_bytes,
+        posters_count=posters_count,
+        database_bytes=db_bytes,
+    )
 
 
 def _parse_date(name: str) -> str | None:
@@ -221,7 +254,7 @@ def _tv_status(ip: str, *, pair: bool = False) -> TvStatus:
         info = get_device_info(ip)
     except Exception as exc:
         logger.warning("TV %s unreachable: %s", ip, exc)
-        return TvStatus(connected=False, message=f"Could not reach the TV: {exc}")
+        return TvStatus(connected=False, message="Could not reach the TV.", detail=str(exc))
     device = info.get("device", {})
 
     def truthy(value: object) -> bool:
@@ -270,7 +303,9 @@ def _birdnet_status(url: str) -> BirdnetStatus:
         resp = requests.get(base, timeout=5)
     except requests.RequestException as exc:
         logger.warning("BirdNET-Go %s unreachable: %s", base, exc)
-        return BirdnetStatus(connected=False, message=f"Could not reach BirdNET-Go: {exc}")
+        return BirdnetStatus(
+            connected=False, message="Could not reach BirdNET-Go.", detail=str(exc)
+        )
     reachable = resp.status_code < _SERVER_ERROR_STATUS
     logger.info(
         "BirdNET-Go %s: HTTP %s (%s)", base, resp.status_code, "reachable" if reachable else "error"
@@ -641,6 +676,10 @@ def create_app() -> FastAPI:
     @app.get("/api/logs")
     def logs() -> dict[str, list[str]]:
         return {"lines": recent_logs()}
+
+    @app.get("/api/storage")
+    def storage() -> StorageInfo:
+        return _storage_info()
 
     @app.get("/api/config/schedule")
     def get_schedule() -> ScheduleConfig:

@@ -7,6 +7,7 @@ export const en = {
   common: {
     save: 'Save',
     saved: 'Saved ✓',
+    showDetails: 'Show details',
   },
   nav: {
     gallery: 'Gallery',
@@ -172,5 +173,11 @@ export const en = {
     weatherTitle: 'Weather',
     weatherDesc: 'Match the live weather so each poster reflects the sky outside.',
     useWeather: 'Use current weather (yr.no) in the scene',
+    storageTitle: 'Storage',
+    storageDesc: 'Disk usage and where BirdScreen is running from.',
+    storagePosters: 'Posters',
+    storageDatabase: 'Database',
+    storagePath: 'Running from',
+    storageFiles: 'files',
   },
 } as const
