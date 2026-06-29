@@ -151,7 +151,10 @@ def make_poster(
         "Resolving scene + building prompt (aspect %s, tier %s)...", aspect_ratio(*size), tier
     )
     prompt, ctx, env = build_daily_prompt(request, weather=weather, usage_sink=usage_sink)
-    logger.info("Location: %s | season: %s", ctx.location_name, env.season)
+    weather_text = ctx.weather.describe() if ctx.weather else "none"
+    logger.info(
+        "Location: %s | season: %s | weather: %s", ctx.location_name, env.season, weather_text
+    )
 
     base = _output_base(request, ctx.location_name)
     base.with_suffix(".txt").write_text(prompt, encoding="utf-8")  # prompt alongside

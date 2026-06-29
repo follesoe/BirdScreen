@@ -134,6 +134,7 @@ export function Status() {
       ? `${t('status.inactive')} · ${t('status.nextAt')} ${fmtTime(status.next_window_start)}`
       : t('status.inactive')
   const speciesValue = status.species_today.length > 0 ? status.species_today.join(', ') : '—'
+  const pendingValue = status.pending_species.join(', ')
   const tvsValue =
     status.tvs.length === 0
       ? '—'
@@ -179,6 +180,9 @@ export function Status() {
           </span>
           <p className="mt-3 font-body text-ink-soft">{status.next_reason}</p>
           <dl className="mt-3">
+            {status.pending_species.length > 0 ? (
+              <Row label={t('status.newBirds')} value={pendingValue} />
+            ) : null}
             <Row label={t('status.eligibleAt')} value={fmtTime(status.next_eligible_at)} />
             {status.next_light_refresh !== null && status.next_light_refresh_kind !== null ? (
               <Row

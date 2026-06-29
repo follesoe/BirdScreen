@@ -95,6 +95,7 @@ export interface StatusResponse {
   next_state: string
   next_eligible_at: string | null
   next_reason: string
+  pending_species: string[]
   next_light_refresh: string | null
   next_light_refresh_kind: string | null
   weather: string | null

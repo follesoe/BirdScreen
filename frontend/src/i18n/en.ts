@@ -71,7 +71,8 @@ export const en = {
     disconnected: 'Not reachable',
     speciesToday: 'Birds heard today',
     nextTitle: 'Next poster',
-    eligibleAt: 'Eligible at',
+    eligibleAt: 'Next paint',
+    newBirds: 'New birds',
     lightRefresh: 'Next light refresh',
     lightKind: {
       midday: 'Midday',

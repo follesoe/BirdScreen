@@ -12,7 +12,7 @@ import socket
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import requests
@@ -131,6 +131,7 @@ class StatusResponse(BaseModel):
     next_state: str
     next_eligible_at: str | None
     next_reason: str
+    pending_species: list[str]  # new birds since the last poster that will trigger the next paint
     next_light_refresh: str | None
     next_light_refresh_kind: str | None
     weather: str | None
@@ -461,6 +462,25 @@ def _compute_status() -> StatusResponse:
             light_at = upcoming_moments[0][0].isoformat()
             light_kind = upcoming_moments[0][1]
 
+    # What the next poster is waiting on. When "ready", show whether new birds are pending
+    # and *when* it will actually paint (after the debounce) — not just "now".
+    last_today = last is not None and last_at is not None and last_at >= day_start
+    pending = sorted(set(species) - set(last.birds)) if (last_today and last) else sorted(species)
+    next_at = plan.eligible_at
+    next_reason = plan.reason
+    if plan.state == "ready":
+        if pending:
+            started = _scheduler.pending_since or now
+            next_at = started + timedelta(minutes=schedule.debounce_minutes)
+            count = len(pending)
+            next_reason = (
+                f"{count} new bird{'s' if count != 1 else ''} heard — "
+                f"painting after a {schedule.debounce_minutes}-min debounce."
+            )
+        else:
+            next_at = None
+            next_reason = "Up to date — will paint when a new bird is heard."
+
     return StatusResponse(
         now=now.isoformat(),
         bird_day_start=day_start.isoformat(),
@@ -470,8 +490,9 @@ def _compute_status() -> StatusResponse:
         generations_today=gens_today,
         daily_cap=schedule.daily_cap,
         next_state=plan.state,
-        next_eligible_at=plan.eligible_at.isoformat() if plan.eligible_at else None,
-        next_reason=plan.reason,
+        next_eligible_at=next_at.isoformat() if next_at else None,
+        next_reason=next_reason,
+        pending_species=pending,
         next_light_refresh=light_at,
         next_light_refresh_kind=light_kind,
         weather=weather_text,
