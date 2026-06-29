@@ -173,14 +173,20 @@ def build_prompt(ctx: PosterContext, env: SeasonInfo) -> str:
 
     setting = (
         f"Setting: the natural scenery around {place} — {env.scenery}. It is {season} "
-        f"({date_str}), and the local time is {time_str}. The daylight right now is "
-        f"{env.light}. Render the vegetation accordingly — {env.foliage}. The weather is "
-        f"{weather_phrase}. CRUCIAL — the lighting must match this exact time of day and "
-        "season: the sky colour, the height and warmth of the sun, the direction and length "
-        "of shadows, and the overall brightness should all clearly read as this hour at this "
-        "latitude (a luminous low-sun glow on long summer evenings, bright overhead midday "
-        "light, dim blue twilight, or near-dark night, as appropriate). Keep the foliage, "
-        "scenery and sky botanically and seasonally accurate for this place and time."
+        f"({date_str}), and the local time is {time_str}. The time of day sets the sun's "
+        f"height and the overall brightness: {env.light}. Render the vegetation accordingly "
+        f"— {env.foliage}. The weather right now is {weather_phrase}. "
+        "CRUCIAL — the light must be coherent with BOTH the time of day AND the weather, as "
+        "one consistent atmosphere. The time of day fixes how high or low the sun sits and "
+        "how bright or dark the scene is; the weather decides whether the sun and sky are "
+        "actually visible. Under clear or fair skies, show the time-of-day sun and its "
+        "colour (a low golden evening glow, bright overhead midday light, or dim blue "
+        "twilight, as appropriate). Under rain, drizzle, snow, fog or heavy cloud the sky is "
+        "overcast and grey, the sun is hidden, and the light is flat, soft and diffuse — no "
+        "sunbeams, no golden glow, no hard cast shadows, even at golden hour — with the "
+        "weather visibly present (wet glistening surfaces, rain in the air, mist or snow as "
+        "fits). Never pair a sunny or golden-sunset sky with rain or heavy cloud. Keep the "
+        "foliage, scenery and sky botanically and seasonally accurate for this place and time."
     )
     bird_block, text_rule = _bird_blocks(ctx, bird_lines)
     if ctx.labels:
