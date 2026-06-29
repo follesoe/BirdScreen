@@ -10,8 +10,8 @@ import scheduleIcon from '@/assets/icons/schedule.png'
 import tvsIcon from '@/assets/icons/tvs.png'
 
 const NAV_ITEMS = [
-  { to: '/status', icon: statusIcon, labelKey: 'nav.status' },
   { to: '/', icon: galleryIcon, labelKey: 'nav.gallery' },
+  { to: '/status', icon: statusIcon, labelKey: 'nav.status' },
   { to: '/logs', icon: logsIcon, labelKey: 'nav.logs' },
   { to: '/settings', icon: settingsIcon, labelKey: 'nav.settings' },
   { to: '/schedule', icon: scheduleIcon, labelKey: 'nav.schedule' },
