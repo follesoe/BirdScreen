@@ -219,6 +219,18 @@ def _safe_poster_path(name: str) -> Path:
     return path
 
 
+def _latest_poster_path() -> Path:
+    """The most recently modified poster image, or 404 if there are none yet."""
+    candidates = (
+        [p for p in POSTERS_DIR.iterdir() if p.is_file() and p.suffix.lower() in _IMAGE_SUFFIXES]
+        if POSTERS_DIR.is_dir()
+        else []
+    )
+    if not candidates:
+        raise HTTPException(status_code=404, detail="no posters yet")
+    return max(candidates, key=lambda p: p.stat().st_mtime)
+
+
 def _thumbnail(name: str) -> Path:
     source = _safe_poster_path(name)
     THUMB_DIR.mkdir(parents=True, exist_ok=True)
@@ -664,6 +676,14 @@ def create_app() -> FastAPI:
     @app.get("/api/posters")
     def posters() -> list[PosterInfo]:
         return list_posters()
+
+    @app.get("/api/posters/latest.jpg")
+    def latest_poster() -> FileResponse:
+        """The newest poster at a stable URL — handy for an iPhone photo widget.
+
+        Content changes over time, so it's marked uncacheable.
+        """
+        return FileResponse(_latest_poster_path(), headers={"Cache-Control": "no-store"})
 
     @app.get("/api/posters/{name}/image")
     def poster_image(name: str) -> FileResponse:
