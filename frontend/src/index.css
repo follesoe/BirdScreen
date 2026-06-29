@@ -51,3 +51,45 @@ body {
     animation: none;
   }
 }
+
+/* Lightbox: the backdrop fades and the panel eases up on open; the poster inside
+   cross-fades when navigating between images. */
+@keyframes bs-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes bs-pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.bs-fade-in {
+  animation: bs-fade-in 240ms ease-out both;
+}
+
+.bs-pop-in {
+  animation: bs-pop-in 260ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.bs-poster-fade {
+  animation: bs-fade-in 200ms ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bs-fade-in,
+  .bs-pop-in,
+  .bs-poster-fade {
+    animation: none;
+  }
+}

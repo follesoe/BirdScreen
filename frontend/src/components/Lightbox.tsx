@@ -29,6 +29,14 @@ export function Lightbox({ name, record, onClose, onPrev, onNext }: LightboxProp
   const [hanging, setHanging] = useState(false)
   const [sendMessage, setSendMessage] = useState<string | null>(null)
   const touchStartX = useRef<number | null>(null)
+  // Track the previous poster (React's "info from previous renders" pattern) so two stacked
+  // layers can truly cross-fade: the old poster stays underneath while the new fades over it.
+  const [displayedName, setDisplayedName] = useState(name)
+  const [previousName, setPreviousName] = useState(name)
+  if (displayedName !== name) {
+    setPreviousName(displayedName)
+    setDisplayedName(name)
+  }
 
   const onTouchStart = (e: TouchEvent<HTMLDivElement>) => {
     touchStartX.current = e.touches[0]?.clientX ?? null
@@ -99,10 +107,10 @@ export function Lightbox({ name, record, onClose, onPrev, onNext }: LightboxProp
         type="button"
         aria-label={t('gallery.close')}
         onClick={onClose}
-        className="absolute inset-0 cursor-default bg-black/70 backdrop-blur-sm"
+        className="bs-fade-in absolute inset-0 cursor-default bg-black/70 backdrop-blur-sm"
       />
       <div
-        className="relative z-10 flex flex-col"
+        className="bs-pop-in relative z-10 flex flex-col"
         style={{ width: 'min(76rem, calc(78vh * 16 / 9))' }}
         onTouchStart={onTouchStart}
         onTouchEnd={onTouchEnd}
@@ -143,21 +151,31 @@ export function Lightbox({ name, record, onClose, onPrev, onNext }: LightboxProp
           </button>
         </div>
 
-        <div className="relative w-full">
-          {/* the wood is a CSS border-image, so the poster shows full 16:9 (no crop) */}
+        <div
+          className="relative w-full shadow-2xl"
+          style={{
+            aspectRatio: '16 / 9',
+            boxSizing: 'content-box',
+            borderStyle: 'solid',
+            borderWidth: 'clamp(12px, 1.8vw, 24px)',
+            borderImageSource: `url(${frameUrl})`,
+            borderImageSlice: '47 48 47 49',
+            borderImageRepeat: 'stretch',
+          }}
+        >
+          {/* The wood is a CSS border-image (static). Two stacked poster layers give a true
+              cross-fade: the previous poster stays underneath while the new one fades over it. */}
           <img
-            src={api.imageUrl(name)}
-            alt={name}
-            className="block w-full select-none shadow-2xl"
-            style={{
-              aspectRatio: '16 / 9',
-              objectFit: 'cover',
-              borderStyle: 'solid',
-              borderWidth: 'clamp(12px, 1.8vw, 24px)',
-              borderImageSource: `url(${frameUrl})`,
-              borderImageSlice: '47 48 47 49',
-              borderImageRepeat: 'stretch',
-            }}
+            src={api.imageUrl(previousName)}
+            alt=""
+            aria-hidden="true"
+            className="absolute inset-0 block h-full w-full select-none object-cover"
+          />
+          <img
+            key={displayedName}
+            src={api.imageUrl(displayedName)}
+            alt={displayedName}
+            className="bs-poster-fade absolute inset-0 block h-full w-full select-none object-cover"
           />
 
           {showInfo ? (
@@ -192,9 +210,9 @@ export function Lightbox({ name, record, onClose, onPrev, onNext }: LightboxProp
             onClick={() => {
               setShowPrompt(false)
             }}
-            className="absolute inset-0 cursor-default bg-black/60"
+            className="bs-fade-in absolute inset-0 cursor-default bg-black/60"
           />
-          <div className="relative z-10 max-h-[80vh] w-full max-w-2xl overflow-y-auto rounded-lg border border-bark/30 bg-paper p-5 shadow-lg">
+          <div className="bs-pop-in relative z-10 max-h-[80vh] w-full max-w-2xl overflow-y-auto rounded-lg border border-bark/30 bg-paper p-5 shadow-lg">
             <div className="mb-3 flex items-center justify-between">
               <h3 className="font-display text-xl text-ink">{t('gallery.promptTitle')}</h3>
               <button
