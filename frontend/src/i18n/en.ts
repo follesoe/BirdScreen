@@ -31,6 +31,8 @@ export const en = {
     undated: 'Undated',
     info: 'Info',
     close: 'Close',
+    prev: 'Previous poster',
+    next: 'Next poster',
     hang: 'Hang it on the wall',
     hanging: 'Hanging…',
     prompt: 'Prompt',

@@ -21,6 +21,8 @@ const PRIMARY =
   'rounded-full bg-robin px-4 py-1.5 font-body text-sm text-parchment shadow hover:bg-robin/90 disabled:opacity-60'
 const DARK =
   'rounded-full bg-ink px-4 py-1.5 font-body text-sm text-parchment shadow hover:bg-ink/90'
+const NAV =
+  'absolute top-1/2 z-20 -translate-y-1/2 rounded-full bg-ink/60 p-2.5 text-parchment shadow-lg transition hover:bg-ink/80'
 
 export function Lightbox({ name, record, onClose, onPrev, onNext }: LightboxProps) {
   const { t } = useTranslation()
@@ -201,6 +203,43 @@ export function Lightbox({ name, record, onClose, onPrev, onNext }: LightboxProp
           ) : null}
         </div>
       </div>
+
+      {onPrev ? (
+        <button
+          type="button"
+          aria-label={t('gallery.prev')}
+          onClick={onPrev}
+          className={`${NAV} left-2 sm:left-4`}
+        >
+          <svg
+            viewBox="0 0 24 24"
+            className="h-6 w-6 sm:h-7 sm:w-7"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+          >
+            <path d="M15 18l-6-6 6-6" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+      ) : null}
+      {onNext ? (
+        <button
+          type="button"
+          aria-label={t('gallery.next')}
+          onClick={onNext}
+          className={`${NAV} right-2 sm:right-4`}
+        >
+          <svg
+            viewBox="0 0 24 24"
+            className="h-6 w-6 sm:h-7 sm:w-7"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+          >
+            <path d="M9 18l6-6-6-6" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+      ) : null}
 
       {showPrompt && promptText !== null ? (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-6">
