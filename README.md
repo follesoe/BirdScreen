@@ -4,20 +4,105 @@
   <img src="assets/birdscreen-logo.webp" alt="BirdScreen — a robin in headphones painting a field-guide plate of birds" width="420">
 </p>
 
-Turn the birds you actually hear into a living piece of art on the wall.
+Turn the birds you actually hear into a living watercolour on the wall.
 
-BirdScreen listens for birds with [BirdNET-Go](https://github.com/tphakala/birdnet-go),
-generates a watercolour field-guide poster of the species heard — set in the real
-location, season, time of day and weather — and hangs it on a **Samsung The Frame** TV
-in Art Mode. As the day goes on and new birds are heard (and the light and weather
-change), it automatically repaints so the art on the wall stays current.
+BirdScreen listens to your garden with [BirdNET-Go](https://github.com/tphakala/birdnet-go),
+and as birds drop by it paints them into a single watercolour field-guide poster — set in
+your real location, season, time of day and weather — then hangs it on a **Samsung The Frame**
+TV in Art Mode. As the day unfolds and new visitors arrive (and the light drifts from morning
+to golden dusk, sun to rain), it quietly repaints, so the picture on your wall is always a
+portrait of *today's* birds.
 
-It runs as a small **web app** (FastAPI + React): a background scheduler drives the
-generation, and a browser UI lets you watch the status, browse the gallery, and tune
-everything. The whole thing is meant to run unattended on a home server (a Mac Mini).
+Under the hood it's a small **web app** (FastAPI + React): a background scheduler does the
+watching and the painting, while a browser UI lets you follow the status, browse the gallery,
+and tune everything. It's built to hum away unattended on a home server — a Mac Mini in a
+closet is plenty.
 
 > **Status: working end-to-end and automatic.** Listening → generating → displaying
 > all run on their own. You configure it from the web UI; the scheduler does the rest.
+
+---
+
+## How it works
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant S as Scheduler
+    participant BN as BirdNET-Go
+    participant OSM as Nominatim
+    participant MET as yr.no / MET
+    participant GT as Gemini text model
+    participant GI as Gemini image model
+    participant TV as Frame TV
+    participant DB as History DB
+
+    Note over S: every ~2 min — active window? under daily cap?<br/>spacing ok? a TV enabled? new birds (or a light moment)?
+    S->>BN: species heard this bird-day + lat/lon
+    BN-->>S: species[] + location
+    S->>OSM: reverse-geocode lat/lon
+    OSM-->>S: place name
+    S->>MET: current weather at lat/lon
+    MET-->>S: conditions (sun / cloud / rain / snow / thunder)
+    S->>GT: describe season + scenery + light
+    GT-->>S: environment text
+    Note over S: assemble the dynamic prompt
+    S->>GI: render 16:9 poster
+    GI-->>S: image + token usage
+    opt upscaling enabled
+        Note over S: Real-ESRGAN → native 4K (3840×2160)
+    end
+    S->>TV: upload · select · switch to Art Mode<br/>(delete the previous BirdScreen poster)
+    S->>DB: save poster + full prompt + tokens + cost
+```
+
+Everything is driven by structured, *dynamic* inputs so the image reflects the real moment:
+the **season/foliage**, the **time-of-day light** (incl. Nordic white-night summer evenings),
+and the **live weather** (sun/cloud/rain/snow/thunder) are each turned into descriptive text
+and fed to the model. The poster is **full-bleed** with species labelled *next to each bird*.
+
+## Examples
+
+The same fjord, hours apart — BirdScreen repaints as the day's birds and the light change.
+Bright mid-morning, then the long pastel glow of a Nordic *white-night* dusk near midnight:
+
+<p align="center">
+  <img src="assets/examples/morning.webp" alt="Watercolour field-guide poster of garden birds around a Norwegian fjord in bright morning light" width="49%">
+  <img src="assets/examples/dusk.webp" alt="The same fjord at white-night dusk under a soft pastel sky" width="49%">
+</p>
+
+Each poster is one *dynamic* prompt, assembled from the live inputs — location, season,
+time-of-day light, current weather and the day's species — and the full prompt is saved with
+every poster. Here's the one behind the dusk plate above:
+
+<details>
+<summary>Show the prompt</summary>
+
+```text
+Create a 16:9 scientific field-guide illustration in the style of a classic ornithological reference plate — delicate pencil/graphite linework with soft, naturalistic watercolor washes.
+
+Setting: the natural scenery around Trondheim, Norway — Coastal fjord landscape, forested hills, boreal spruce and pine, birch stands, rocky shorelines. It is midsummer, peak growing season (28 June 2026), and the local time is 23:44. The daylight right now is Bright twilight, 'white night' conditions, prolonged civil dusk, soft blue and pastel sky. Render the vegetation accordingly — Deciduous trees full vibrant green, conifers dark green, lush undergrowth, wildflowers blooming. The weather is mostly clear skies with only a few high clouds (about 20°C). CRUCIAL — the lighting must match this exact time of day and season: the sky colour, the height and warmth of the sun, the direction and length of shadows, and the overall brightness should all clearly read as this hour at this latitude (a luminous low-sun glow on long summer evenings, bright overhead midday light, dim blue twilight, or near-dark night, as appropriate). Keep the foliage, scenery and sky botanically and seasonally accurate for this place and time.
+
+Feature the following birds, each accurately and recognisably rendered to scale and arranged naturally within a single cohesive scene (perched on branches, resting on shoreline rocks, wading, or in flight as best suits each species). Label each bird with a small serif caption placed directly beside or just below that bird, right next to it in the scene — do NOT gather the names into a list, key, legend or caption strip along the bottom or edge. Each caption shows the common name in Norwegian on top and the scientific (Latin) name beneath it in italics:
+  - Tårnseiler (Apus apus)
+  - Skjære (Pica pica)
+  - Fiskemåke (Larus canus)
+  - Blåmeis (Cyanistes caeruleus)
+  - Bokfink (Fringilla coelebs)
+  - Grønnsisik (Spinus spinus)
+  - Ringdue (Columba palumbus)
+  - Grønnfink (Chloris chloris)
+  - Gråspurv (Passer domesticus)
+  - Spettmeis (Sitta europaea)
+  - Gråtrost (Turdus pilaris)
+  - Trepiplerke (Anthus trivialis)
+  - Sivhøne (Gallinula chloropus)
+  - Vintererle (Motacilla cinerea)
+
+Composition: one immersive watercolour scene that fills the entire frame. The landscape, foliage and sky must run right to and softly bleed off all four edges, the washes feathering organically into the paper at the margins. Use NO border, frame, panel, plate outline, vignette or clean rectangular margin — nothing should box the scene in; the artwork goes edge to edge. The birds are the clear focus among the natural foliage. Fine, detailed linework with gentle watercolor washes; no harsh outlines, no photographic realism, no text except the small per-bird species labels — no title, heading or list.
+```
+
+</details>
 
 ---
 
@@ -29,7 +114,7 @@ This is the playbook to move BirdScreen onto the machine that runs BirdNET-Go.
 - macOS on Apple Silicon, with [`uv`](https://docs.astral.sh/uv/) and **Node.js** (for the web build).
 - A running **BirdNET-Go** (see [below](#birdnet-go-the-audio-source)) — note its URL, e.g. `http://localhost:8080`.
 - A **Gemini API key** (from <https://aistudio.google.com/apikey>).
-- A **Samsung The Frame** TV **on the same LAN/subnet as this machine** (this matters — see [Networking](#networking-gotcha)).
+- A **Samsung The Frame** TV **on the same LAN/subnet as this machine** (it must share the subnet — pairing/upload silently fails across subnets or a guest VLAN).
 
 **Steps**
 
@@ -53,7 +138,7 @@ Then open **`http://<this-host>.local:8000`** (or `http://localhost:8000`) and f
 5. **Settings** — set the BirdNET-Go URL, image model + size, upscaling, and weather. Location is read from BirdNET-Go automatically (or override the lat/lon).
 6. **Schedule** — active hours (windows may cross midnight, e.g. `06:00–02:00`), the day-reset boundary (e.g. `04:00`), daily cap, debounce, and minimum spacing.
 7. **TVs** — add the Frame's IP, tick **"Update this TV (push new posters)"**, click **Check status**, and **accept the "Allow" popup on the TV** to pair it (the TV must be awake / on a normal input). The auth token is cached in `.tv-token-<ip>`.
-8. **Done** — the scheduler now renders and hangs a fresh poster automatically during active hours as new birds come in. Watch it on the **Status** page (it shows a per-minute heartbeat in **Logs**).
+8. **Done** — the scheduler now renders and hangs a fresh poster automatically during active hours as new birds come in. Watch it on the **Status** page (it logs a heartbeat in **Logs** every couple of minutes).
 
 **Keep it running 24/7.** macOS will sleep and suspend the server. Run it so the Mac stays awake while plugged in, e.g.:
 
@@ -78,37 +163,12 @@ and in `frontend/`: `npm run typecheck && npm run lint && npm run build`.
 
 ---
 
-## How it works
-
-```
-BirdNET-Go (audio → species)
-        │  bird-day window (day_reset → now, e.g. 04:00→04:00, high-confidence only)
-        ▼
-scheduler  (background loop; rules from the Status page)
-        │  active window? under daily cap? min-spacing ok? a TV enabled? new species (+ debounce)?
-        ▼
-generate:  lat/lon + time + species
-        │  ├─ reverse geocode (OpenStreetMap Nominatim) → place name
-        │  ├─ current weather (yr.no / MET Norway)
-        │  └─ season + scenery + light (Gemini text model, location-aware)
-        ▼
-   dynamic prompt  →  Gemini image model  →  poster  (timestamped, + full prompt/usage in the DB)
-        │  └─ (optional) Real-ESRGAN super-resolution → native 4K (3840×2160)
-        ▼
-   Samsung The Frame TV  (Art Mode) — overwrites the previous BirdScreen poster
-```
-
-Everything is driven by structured, *dynamic* inputs so the image reflects the real moment:
-the **season/foliage**, the **time-of-day light** (incl. Nordic white-night summer evenings),
-and the **live weather** (sun/cloud/rain/snow/thunder) are each turned into descriptive text
-and fed to the model. The poster is **full-bleed** with species labelled *next to each bird*.
-
 ## The web app
 
 | Page | What it shows / does |
 |---|---|
 | **Status** | "Right now" (active window, location, weather, BirdNET-Go, birds heard today, configured TVs), the next-poster state + reason, and the generation **history** (with prompt, tokens & est. cost). **Generate now** renders + hangs immediately. |
-| **Gallery** | All posters; click for a framed lightbox with keyboard ◀ ▶ / swipe nav, an info panel, the prompt, and **Hang it on the wall**. |
+| **Gallery** | All posters, grouped by day; click for a framed lightbox that cross-fades between posters (◀ ▶ arrows / keyboard / swipe), with an info panel, the full prompt, and **Hang it on the wall**. |
 | **Logs / Settings / Schedule / TVs** | Recent logs; and the config screens that write `config.yaml`. |
 
 The scheduler's **stop conditions** are surfaced on the Status page like badges: *outside hours*,
@@ -156,7 +216,6 @@ resolution barely lowers its cost (a roughly fixed reasoning-token pool), so ren
 | Model | Per image | Craft | Text / labels |
 |---|---|---|---|
 | **`gemini-3-pro-image`** (Pro) | ~$0.21–0.33 | ★★★ | ✅ correct, beside each bird |
-| `gemini-3.1-flash-image` | ~$0.07–0.15 | ★★ | better than 2.5 |
 | `gemini-2.5-flash-image` | ~$0.039 | ★★ | ❌ garbled — pair with `--no-labels` + our composited labels |
 
 ## Super-resolution
@@ -183,13 +242,6 @@ reserved `1005` websocket close that newer `websocket-client` rejects (we tolera
 popup only appears when the TV is **awake / on a normal input** (not Art Mode), and won't re-prompt for
 a remembered client — if pairing is stuck, remove the client under *Settings → General → External Device
 Manager → Device Connection Manager* and retry.
-
-### Networking gotcha
-
-The server and the TV must be on the **same subnet**. The Frame answers REST and even completes the
-websocket *upgrade* across subnets, then silently drops the authenticated session — which looks exactly
-like a pairing failure. If pairing/upload mysteriously fails, check you're not on a guest VLAN
-(`route -n get <tv-ip>` / `ipconfig getifaddr en0`).
 
 ---
 
