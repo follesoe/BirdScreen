@@ -107,35 +107,64 @@ def _output_base(request: PosterRequest, location_name: str | None) -> Path:
     return _next_indexed_base(directory, stem)
 
 
+def _tmp_sibling(dest: Path) -> Path:
+    """``foo.jpg`` -> ``foo.jpg.tmp`` (same directory, for an atomic publish)."""
+    return dest.with_name(f"{dest.name}.tmp")
+
+
+def _publish(work: Path) -> Path:
+    """Atomically rename a ``*.tmp`` working file onto its real destination.
+
+    Building into a ``*.tmp`` sibling and renaming as the final step means the
+    real output file only ever appears complete — automations watching the
+    posters folder for new ``.jpg`` files never catch a pre-upscale or
+    half-written image.
+    """
+    dest = work.with_name(work.name.removesuffix(".tmp"))
+    work.replace(dest)
+    return dest
+
+
 def _finalize_image(request: PosterRequest, base: Path, raw: Path, orig_ext: str) -> Path:
-    """Turn the raw Gemini render into the final image (upscale / downscale / as-is)."""
+    """Render the raw Gemini output into the final image at a temporary path.
+
+    Does the work (upscale / downscale / as-is) into a ``*.tmp`` sibling of the
+    real destination and returns that temp path; the caller publishes it with an
+    atomic rename (see :func:`_publish`).
+    """
     size = (request.width, request.height)
     explicit = Path(request.out) if request.out is not None else None
 
     if request.upscale:
-        # Keep the raw render as the "original", then AI-upscale to native size.
-        original = base.with_suffix(orig_ext)
-        raw.replace(original)
         from birdscreen.upscale import super_resolve  # noqa: PLC0415 — optional torch dep
 
-        sr_tmp = base.with_suffix(".srtmp.png")
-        super_resolve(original, model=request.upscale).save(sr_tmp)
-        final = explicit or base.with_name(
+        dest = explicit or base.with_name(
             f"{base.name}_upscaled-{_slug(request.upscale)}"
         ).with_suffix(".jpg")
-        prepare_for_frame(sr_tmp, dst=final, size=size)
+        work = _tmp_sibling(dest)
+        sr_tmp = base.with_suffix(".srtmp.png")
+        super_resolve(raw, model=request.upscale).save(sr_tmp)
+        prepare_for_frame(sr_tmp, dst=work, size=size)
         sr_tmp.unlink(missing_ok=True)
-        return final
+        # Keep the raw render as the "original" (unless that name is the dest).
+        original = base.with_suffix(orig_ext)
+        if original == dest:
+            raw.unlink(missing_ok=True)
+        else:
+            raw.replace(original)
+        return work
 
     if request.scale:
-        final = explicit or base.with_suffix(".jpg")
-        prepare_for_frame(raw, dst=final, size=size)
+        dest = explicit or base.with_suffix(".jpg")
+        work = _tmp_sibling(dest)
+        prepare_for_frame(raw, dst=work, size=size)
         raw.unlink(missing_ok=True)
-        return final
+        return work
 
-    final = explicit or base.with_suffix(orig_ext)
-    raw.replace(final)
-    return final
+    dest = explicit or base.with_suffix(orig_ext)
+    work = _tmp_sibling(dest)
+    raw.replace(work)
+    return work
 
 
 def make_poster(
@@ -174,10 +203,12 @@ def make_poster(
         fmt = (im.format or "PNG").lower()
     orig_ext = ".jpg" if fmt in ("jpeg", "jpg") else f".{fmt}"
 
-    final = _finalize_image(request, base, raw, orig_ext)
+    work = _finalize_image(request, base, raw, orig_ext)
+    final = _publish(work)  # atomic rename: the .jpg appears only once fully processed
     if not request.labels:
-        labeled = final.with_name(f"{final.stem}_labeled.jpg")
-        final = compose_poster(final, labeled, title=request.title, birds=request.birds, size=size)
+        labeled = _tmp_sibling(final.with_name(f"{final.stem}_labeled.jpg"))
+        compose_poster(final, labeled, title=request.title, birds=request.birds, size=size)
+        final = _publish(labeled)
     logger.info("Saved poster: %s", final)
     return RenderResult(final, prompt, ctx, env)
 
