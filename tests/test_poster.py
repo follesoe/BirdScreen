@@ -37,12 +37,12 @@ def test_parse_size() -> None:
     assert parse_size("1024X768") == (1024, 768)
 
 
-def _ctx(*, labels: bool) -> PosterContext:
+def _ctx(*, labels: bool, birds: list[Bird] | None = None) -> PosterContext:
     return PosterContext(
         latitude=63.4,
         longitude=10.4,
         when=datetime(2026, 6, 1, 12, 0),
-        birds=[Bird("Pica pica", "Skjære")],
+        birds=[Bird("Pica pica", "Skjære")] if birds is None else birds,
         location_name="Trondheim, Norway",
         labels=labels,
     )
@@ -64,3 +64,14 @@ def test_build_prompt_no_labels_forbids_text_and_omits_title() -> None:
     prompt = build_prompt(_ctx(labels=False), _ENV)
     assert "NO text" in prompt
     assert "Hørt i dag" not in prompt  # title is composited by us, not the model
+
+
+def test_build_prompt_no_birds_forbids_invented_wildlife() -> None:
+    # With an empty bird list the prompt must NOT ask the model to "feature"
+    # birds (it would invent them) — it must explicitly forbid any wildlife.
+    prompt = build_prompt(_ctx(labels=True, birds=[]), _ENV)
+    assert "Feature the following birds" not in prompt
+    assert "NO birds" in prompt
+    assert "no other animals" in prompt
+    # The scenery description still renders, so it's a real (empty) habitat scene.
+    assert "fjord" in prompt

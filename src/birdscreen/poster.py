@@ -127,8 +127,29 @@ def _bird_line(bird: Bird) -> str:
     return f"  - {bird.common} ({bird.scientific})" if bird.common else f"  - {bird.scientific}"
 
 
+def _birdless_block() -> tuple[str, str]:
+    """(subject_block, text_rule) for the no-birds case — paint scenery only.
+
+    When no birds have been observed we must NOT ask the model to "feature the
+    following birds" with an empty list: it fills the gap by inventing plausible
+    local species. Instead, explicitly forbid any birds so the poster honestly
+    shows an empty, quiet habitat.
+    """
+    block = (
+        "\n\nNo birds have been observed — this is a quiet, empty scene. Paint ONLY the "
+        "natural scenery (landscape, foliage, water and sky). Depict absolutely NO birds, "
+        "and no other animals of any kind, anywhere in the image — none perched, none in "
+        "flight, none in the distance, none half-hidden. Do NOT invent, add or imply any "
+        "wildlife, however common it might be here. It is simply a calm, still habitat with "
+        "no creatures present."
+    )
+    return block, "absolutely no text, letters or numbers of any kind."
+
+
 def _bird_blocks(ctx: PosterContext, bird_lines: str) -> tuple[str, str]:
     """Return (bird_block, text_rule) for the labelled/unlabelled modes (no title)."""
+    if not ctx.birds:
+        return _birdless_block()
     if ctx.labels:
         bird_block = (
             "\n\nFeature the following birds, each accurately and recognisably rendered to "
@@ -189,6 +210,17 @@ def build_prompt(ctx: PosterContext, env: SeasonInfo) -> str:
         "foliage, scenery and sky botanically and seasonally accurate for this place and time."
     )
     bird_block, text_rule = _bird_blocks(ctx, bird_lines)
+    focus_scene = (
+        "The birds are the clear focus among the natural foliage."
+        if ctx.birds
+        else "The natural scenery and foliage are the focus; there are no birds in the scene."
+    )
+    focus_plate = (
+        "with the birds as the clear focus and natural foliage framing the edges"
+        if ctx.birds
+        else "with the natural scenery and foliage as the focus, no birds present, framing the "
+        "edges"
+    )
     if ctx.labels:
         # Full-bleed immersive scene (the painted poster shown on the Frame): the
         # scenery runs off all four edges with no border — the early-poster look.
@@ -197,16 +229,15 @@ def build_prompt(ctx: PosterContext, env: SeasonInfo) -> str:
             "The landscape, foliage and sky must run right to and softly bleed off all four "
             "edges, the washes feathering organically into the paper at the margins. Use NO "
             "border, frame, panel, plate outline, vignette or clean rectangular margin — "
-            "nothing should box the scene in; the artwork goes edge to edge. The birds are "
-            "the clear focus among the natural foliage. Fine, detailed linework with gentle "
+            "nothing should box the scene in; the artwork goes edge to edge. "
+            f"{focus_scene} Fine, detailed linework with gentle "
             f"watercolor washes; no harsh outlines, no photographic realism, {text_rule}"
         )
     else:
         composition = (
             "\n\nComposition: a calm, balanced field-guide plate on a soft parchment-toned "
-            "background, with the birds as the clear focus and natural foliage framing the "
-            "edges. Fine, detailed linework with gentle watercolor washes; no harsh "
-            f"outlines, no photographic realism, {text_rule}"
+            f"background, {focus_plate}. Fine, detailed linework with gentle watercolor "
+            f"washes; no harsh outlines, no photographic realism, {text_rule}"
         )
     return f"Create a {aspect} {ctx.style}.\n\n{setting}{bird_block}{composition}"
 
