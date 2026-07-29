@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { api, type BirdnetStatus, type StorageInfo } from '@/api/client'
+import { api, type BirdnetStatus, type GeminiStatus, type StorageInfo } from '@/api/client'
 import { PageHeading } from '@/components/PageHeading'
 import { PageHero } from '@/components/PageHero'
 import { StatusError } from '@/components/StatusError'
@@ -35,6 +35,86 @@ function BirdnetStatusLine({ status }: { status: BirdnetStatus | 'loading' }) {
     )
   }
   return <p className="text-sm text-sage">{t('settings.birdnetOk')}</p>
+}
+
+function GeminiStatusLine() {
+  const { t } = useTranslation()
+  const [status, setStatus] = useState<GeminiStatus | 'loading' | null>('loading')
+  const [testing, setTesting] = useState(false)
+
+  // Passive check on load (free); an explicit probe (billable) on the Test button.
+  const load = useCallback((probe: boolean) => {
+    if (probe) setTesting(true)
+    else setStatus('loading')
+    void api
+      .geminiStatus(probe)
+      .then((s) => {
+        setStatus(s)
+      })
+      .catch(() => {
+        setStatus(null)
+      })
+      .finally(() => {
+        setTesting(false)
+      })
+  }, [])
+
+  // Deferred so the initial fetch's setState isn't called synchronously in the effect.
+  useEffect(() => {
+    const id = setTimeout(() => {
+      load(false)
+    }, 0)
+    return () => {
+      clearTimeout(id)
+    }
+  }, [load])
+
+  let body
+  if (status === 'loading') {
+    body = <p className="text-sm text-ink-soft">{t('settings.geminiChecking')}</p>
+  } else if (status === null) {
+    body = <p className="text-sm text-ink-soft">{t('settings.geminiUnknown')}</p>
+  } else if (status.kind === 'ok') {
+    body = <p className="text-sm text-sage">{status.message}</p>
+  } else if (status.kind === 'unknown') {
+    body = <p className="text-sm text-ink-soft">{status.message}</p>
+  } else if (status.out_of_credits || status.kind === 'auth' || status.kind === 'no_key') {
+    // Real, non-self-healing problems — needs the user to act (top up / fix the key).
+    body = (
+      <div className="rounded-lg border border-robin/40 bg-robin/5 p-3 text-sm">
+        <StatusError message={status.message} detail={status.detail} />
+      </div>
+    )
+  } else {
+    // Transient (rate limited) or unclassified — a softer warning.
+    body = (
+      <div className="rounded-lg border border-amber/50 bg-amber/10 p-3 text-sm">
+        <StatusError message={status.message} detail={status.detail} />
+      </div>
+    )
+  }
+
+  const since =
+    status !== 'loading' && status !== null && status.since !== null
+      ? `${status.checked_live ? t('settings.geminiTestedAt') : t('settings.geminiAsOf')} ${new Date(status.since).toLocaleString()}`
+      : null
+
+  return (
+    <div className="mt-1 flex flex-col gap-2">
+      {body}
+      {since !== null ? <p className="text-xs text-ink-soft/70">{since}</p> : null}
+      <button
+        type="button"
+        disabled={testing || status === 'loading'}
+        onClick={() => {
+          load(true)
+        }}
+        className="self-start font-body text-sm text-bark underline underline-offset-2 hover:text-ink disabled:opacity-50"
+      >
+        {testing ? t('settings.geminiTesting') : t('settings.geminiTest')}
+      </button>
+    </div>
+  )
 }
 
 function fmtBytes(bytes: number): string {
@@ -141,6 +221,7 @@ export function Settings() {
               ))}
             </select>
           </Field>
+          <GeminiStatusLine />
           <Field label={t('settings.imageSize')}>
             <select
               value={config.image_size}

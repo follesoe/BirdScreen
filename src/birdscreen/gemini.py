@@ -64,6 +64,73 @@ def get_client(api_key: str | None = None) -> genai.Client:
     return genai.Client(api_key=key)
 
 
+# A cheap text model, used only for the health/credits probe. It shares the API key and
+# prepaid billing with the image model, so on a billing-enabled key a depleted balance
+# 429s here too. Caveat: if the account keeps free-tier quota for this text model that the
+# paid image model lacks, a live probe can read "ok" while image generation still fails.
+PROBE_MODEL = os.environ.get("BIRDSCREEN_TEXT_MODEL", "gemini-2.5-flash")
+
+# Substrings Google uses when *prepaid billing is depleted* (as opposed to a plain,
+# self-healing rate limit) — both surface as HTTP 429 RESOURCE_EXHAUSTED.
+_CREDIT_MARKERS = ("credit", "billing", "depleted", "prepay")
+_TOO_MANY_REQUESTS = 429  # HTTP 429 RESOURCE_EXHAUSTED (rate limit *or* billing depleted)
+_AUTH_CODES = (401, 403)  # invalid/insufficient API key
+
+
+def classify_api_error(exc: BaseException) -> tuple[str, str]:
+    """Map a Gemini failure to ``(kind, human message)``.
+
+    ``kind`` is one of: ``out_of_credits`` (billing depleted — needs a top-up),
+    ``rate_limited`` (transient), ``no_key``, ``auth``, ``error``.
+    """
+    text = str(exc)
+    low = text.lower()
+    code = getattr(exc, "code", None)
+    if isinstance(exc, RuntimeError) and "api key" in low:
+        return ("no_key", "No Gemini API key configured — set GEMINI_API_KEY.")
+    if code == _TOO_MANY_REQUESTS or "resource_exhausted" in low:
+        if any(marker in low for marker in _CREDIT_MARKERS):
+            return (
+                "out_of_credits",
+                "Out of Gemini credits — top up billing in Google AI Studio to resume painting.",
+            )
+        return (
+            "rate_limited",
+            "Gemini is rate-limiting requests right now; it should recover on its own.",
+        )
+    if code in _AUTH_CODES or "permission" in low or "api key not valid" in low:
+        return ("auth", "Gemini rejected the API key — check it's valid and billing is enabled.")
+    return ("error", "Couldn't reach Gemini.")
+
+
+def is_gemini_error(exc: BaseException) -> bool:
+    """True only when ``exc`` is attributable to the Gemini API itself.
+
+    Lets callers distinguish a real Gemini failure (quota, auth, server) from an
+    unrelated downstream failure in the same code path (image processing, TV upload,
+    a missing location) so the latter is never mislabeled as a Gemini/credits problem.
+    """
+    if isinstance(exc, errors.APIError):
+        return True
+    # get_client() raises this when the key is missing — genuinely a Gemini problem.
+    return isinstance(exc, RuntimeError) and "gemini api key" in str(exc).lower()
+
+
+def check_health(*, model: str = PROBE_MODEL, client: genai.Client | None = None) -> None:
+    """Make a minimal billable request to confirm the key works and credits remain.
+
+    Returns normally on success; raises the underlying error on failure (callers
+    classify it via :func:`classify_api_error`). Deliberately tiny — a one-token reply
+    — so probing costs next to nothing.
+    """
+    client = client or get_client()
+    client.models.generate_content(
+        model=model,
+        contents="ping",
+        config=types.GenerateContentConfig(max_output_tokens=1),
+    )
+
+
 def _extract_image_bytes(response: types.GenerateContentResponse) -> bytes | None:
     for candidate in response.candidates or []:
         content = getattr(candidate, "content", None)

@@ -60,6 +60,16 @@ export interface BirdnetStatus {
   detail: string | null
 }
 
+export interface GeminiStatus {
+  kind: string
+  out_of_credits: boolean
+  checked_live: boolean
+  model: string
+  message: string
+  detail: string | null
+  since: string | null
+}
+
 export interface StorageInfo {
   working_dir: string
   posters_bytes: number
@@ -162,6 +172,8 @@ export const api = {
     getJson<TvStatus>(`/api/tvs/status?ip=${encodeURIComponent(ip)}&pair=${String(pair)}`),
   birdnetStatus: (url: string): Promise<BirdnetStatus> =>
     getJson<BirdnetStatus>(`/api/birdnet/status?url=${encodeURIComponent(url)}`),
+  geminiStatus: (probe = false): Promise<GeminiStatus> =>
+    getJson<GeminiStatus>(`/api/gemini/status?probe=${String(probe)}`),
   status: (): Promise<StatusResponse> => getJson<StatusResponse>('/api/status'),
   generations: (): Promise<GenerationLogEntry[]> =>
     getJson<GenerationLogEntry[]>('/api/generations'),

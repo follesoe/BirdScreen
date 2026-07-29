@@ -6,6 +6,7 @@ The React frontend (built to ``frontend/dist``) is served at ``/``.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import socket
@@ -23,7 +24,7 @@ from fastapi.staticfiles import StaticFiles
 from PIL import Image
 from pydantic import BaseModel
 
-from birdscreen import birdnet, engine, generate, state
+from birdscreen import birdnet, engine, gemini, generate, state
 from birdscreen.config import ScheduleConfig, SettingsConfig, TvConfig, load_config, save_config
 from birdscreen.geocode import reverse_geocode
 from birdscreen.images import prepare_for_frame
@@ -50,6 +51,13 @@ class _SchedulerState:
 
     started = False
     pending_since: datetime | None = None  # when new species first appeared (debounce)
+    # Passive Gemini signal: the classified outcome of the last real generation attempt.
+    # Set when a paint fails, cleared on success — so "out of credits" surfaces for free,
+    # from an actual attempt, with no extra probe. (None kind = no failure on record.)
+    last_error_kind: str | None = None
+    last_error_message: str | None = None
+    last_error_detail: str | None = None
+    last_error_at: datetime | None = None
 
 
 _scheduler = _SchedulerState()
@@ -88,6 +96,24 @@ class BirdnetStatus(BaseModel):
     server: str | None = None  # the Server response header, if any
     message: str | None = None
     detail: str | None = None  # full error text (shown behind a "details" toggle)
+
+
+class GeminiStatus(BaseModel):
+    """Whether Gemini can generate right now (key valid + credits available).
+
+    Two signals feed this: the *passive* outcome of the last real generation attempt
+    (free — a failed paint already told us we're out of credits) and an on-demand
+    *live probe* (one tiny billable call, ``checked_live``), used to confirm a top-up
+    when no real generation has run since.
+    """
+
+    kind: str  # 'ok' | 'out_of_credits' | 'rate_limited' | 'no_key' | 'auth' | 'error' | 'unknown'
+    out_of_credits: bool  # prepaid billing depleted (needs a top-up, not self-healing)
+    checked_live: bool  # True = fresh billable probe; False = passive last-known state
+    model: str  # the configured image model (what generation actually uses)
+    message: str
+    detail: str | None = None  # full error text (shown behind a "details" toggle)
+    since: str | None = None  # ISO time the reported state was observed
 
 
 class LocationInfo(BaseModel):
@@ -252,6 +278,147 @@ def _tv_token_file(ip: str) -> Path:
 def _tv_art_file(ip: str) -> Path:
     """Per-TV file caching the content_id of the poster currently hung on it."""
     return Path(f".tv-art-{ip.replace('.', '-').replace(':', '-')}")
+
+
+# Durable copy of the passive Gemini error so it survives a process restart. Without it,
+# a depleted-credits state would reset to a falsely-healthy "ok" on every restart until
+# the next paint fails again (which may be hours away, outside an active window).
+_GEMINI_ERROR_FILE = Path("cache/gemini_error.json")
+
+
+def _write_gemini_error(payload: dict[str, str]) -> None:
+    try:
+        _GEMINI_ERROR_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _GEMINI_ERROR_FILE.write_text(json.dumps(payload), encoding="utf-8")
+    except OSError as exc:
+        logger.warning("Could not persist Gemini error state: %s", exc)
+
+
+def _persisted_gemini_error() -> dict[str, str] | None:
+    try:
+        raw = _GEMINI_ERROR_FILE.read_text(encoding="utf-8")
+    except (FileNotFoundError, OSError):
+        return None
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    return {str(key): str(value) for key, value in data.items()}
+
+
+def _record_gemini_error(exc: BaseException) -> None:
+    """Remember a *Gemini* generation failure as the passive signal (durably).
+
+    No-ops for non-Gemini failures (image processing, TV upload, a missing location) so a
+    downstream error is never mislabeled as a Gemini/credits problem in Settings.
+    """
+    if not gemini.is_gemini_error(exc):
+        return
+    kind, message = gemini.classify_api_error(exc)
+    detail = str(exc)
+    at = datetime.now()
+    _scheduler.last_error_kind = kind
+    _scheduler.last_error_message = message
+    _scheduler.last_error_detail = detail
+    _scheduler.last_error_at = at
+    _write_gemini_error({"kind": kind, "message": message, "detail": detail, "at": at.isoformat()})
+
+
+def _clear_gemini_error() -> None:
+    """Forget any recorded failure (a Gemini call has since succeeded)."""
+    _scheduler.last_error_kind = None
+    _scheduler.last_error_message = None
+    _scheduler.last_error_detail = None
+    _scheduler.last_error_at = None
+    try:
+        _GEMINI_ERROR_FILE.unlink(missing_ok=True)
+    except OSError as exc:
+        logger.warning("Could not clear persisted Gemini error state: %s", exc)
+
+
+def _gemini_status(*, probe: bool = False) -> GeminiStatus:
+    """Report whether Gemini can generate right now.
+
+    The API key exposes no credit-balance endpoint, so "out of credits" can only be
+    learned by *attempting* a billable call and reading the error. This has two modes:
+
+    - passive (default): report the outcome of the last *real* generation attempt —
+      free, and already accurate whenever the scheduler has recently tried to paint.
+    - ``probe``: make one tiny billable call now (a cheap text model that shares the key
+      + billing with the image model) to confirm live — e.g. right after a top-up.
+    """
+    model = load_config().settings.model
+
+    if probe:
+        try:
+            gemini.check_health()
+        except Exception as exc:
+            _record_gemini_error(exc)
+            kind, message = gemini.classify_api_error(exc)
+            logger.warning("Gemini probe failed (%s): %s", kind, exc)
+            return GeminiStatus(
+                kind=kind,
+                out_of_credits=kind == "out_of_credits",
+                checked_live=True,
+                model=model,
+                message=message,
+                detail=str(exc),
+                since=_scheduler.last_error_at.isoformat() if _scheduler.last_error_at else None,
+            )
+        _clear_gemini_error()
+        return GeminiStatus(
+            kind="ok",
+            out_of_credits=False,
+            checked_live=True,
+            model=model,
+            message="Connected — API key valid and credits available.",
+            since=datetime.now().isoformat(),
+        )
+
+    # Passive: surface the last real failure — from memory, or the persisted copy that
+    # survives a restart (so a depleted-credits state isn't forgotten on reboot)…
+    error_kind = _scheduler.last_error_kind
+    error_message = _scheduler.last_error_message
+    error_detail = _scheduler.last_error_detail
+    error_at = _scheduler.last_error_at.isoformat() if _scheduler.last_error_at else None
+    if error_kind is None:
+        persisted = _persisted_gemini_error()
+        if persisted is not None:
+            error_kind = persisted.get("kind")
+            error_message = persisted.get("message")
+            error_detail = persisted.get("detail")
+            error_at = persisted.get("at")
+    if error_kind is not None:
+        return GeminiStatus(
+            kind=error_kind,
+            out_of_credits=error_kind == "out_of_credits",
+            checked_live=False,
+            model=model,
+            message=error_message or "Gemini generation failed.",
+            detail=error_detail,
+            since=error_at,
+        )
+
+    # …otherwise fall back to the last successful paint, or "not tested yet".
+    last = state.last_generation()
+    if last is not None and last.output:
+        return GeminiStatus(
+            kind="ok",
+            out_of_credits=False,
+            checked_live=False,
+            model=model,
+            message="Last poster generated successfully — no errors since.",
+            since=last.created_at,
+        )
+    return GeminiStatus(
+        kind="unknown",
+        out_of_credits=False,
+        checked_live=False,
+        model=model,
+        message="No generation attempted yet — run a test to check credits.",
+    )
 
 
 def _tv_status(ip: str, *, pair: bool = False) -> TvStatus:
@@ -515,11 +682,13 @@ def _run_generation_locked(trigger: str, reason: str) -> None:
     try:
         logger.info("Generating (%s) — %s", trigger, reason)
         record = generate.generate_now(trigger=trigger, reason=reason)
+        _clear_gemini_error()  # Gemini produced an image → credits/key are fine
         if record.output:
             result = _send_to_tvs(record.output, enabled_only=True)
             logger.info("Hung %s — %s", record.output, result.message)
-    except Exception:
+    except Exception as exc:
         logger.exception("Generation failed (%s)", trigger)
+        _record_gemini_error(exc)  # no-ops unless exc is a genuine Gemini error
     finally:
         _generation_lock.release()
 
@@ -762,6 +931,10 @@ def create_app() -> FastAPI:
     @app.get("/api/birdnet/status")
     def birdnet_status(url: str) -> BirdnetStatus:
         return _birdnet_status(url)
+
+    @app.get("/api/gemini/status")
+    def gemini_status(probe: bool = False) -> GeminiStatus:
+        return _gemini_status(probe=probe)
 
     @app.get("/api/birdnet/location")
     def birdnet_location() -> LocationInfo:
