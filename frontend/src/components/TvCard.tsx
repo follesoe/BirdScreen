@@ -22,7 +22,13 @@ function StatusView({ status }: { status: TvStatus | 'loading' }) {
     return (
       <div className="rounded-lg border border-robin/40 bg-robin/5 p-3 text-sm">
         <StatusError message={status.message ?? t('tvs.unreachable')} detail={status.detail} />
-        <p className="mt-1 text-ink-soft">{t('tvs.pairingHint')}</p>
+        {status.subnet_mismatch ? (
+          <p className="mt-1 font-body text-robin">
+            {t('tvs.subnetMismatch', { server: status.server_ip ?? '?' })}
+          </p>
+        ) : (
+          <p className="mt-1 text-ink-soft">{t('tvs.pairingHint')}</p>
+        )}
       </div>
     )
   }

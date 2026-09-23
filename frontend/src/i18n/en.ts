@@ -113,6 +113,8 @@ export const en = {
     pairingHint:
       'The first time BirdScreen connects to control a TV, the TV shows an "Allow" prompt — accept it on the TV with the remote.',
     unreachable: 'Could not reach the TV.',
+    subnetMismatch:
+      'The TV appears to be on a different subnet than the server ({{server}}). They can’t communicate even though discovery may still find the TV — put both on the same network (check the server hasn’t joined a guest Wi-Fi).',
     statusName: 'Name',
     statusModel: 'Model',
     statusResolution: 'Screen size',

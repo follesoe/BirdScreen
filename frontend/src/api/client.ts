@@ -50,6 +50,8 @@ export interface TvStatus {
   token_auth: boolean
   message: string | null
   detail: string | null
+  server_ip: string | null
+  subnet_mismatch: boolean
 }
 
 export interface BirdnetStatus {

@@ -6,6 +6,7 @@ The React frontend (built to ``frontend/dist``) is served at ``/``.
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import logging
 import os
@@ -86,6 +87,8 @@ class TvStatus(BaseModel):
     token_auth: bool = False
     message: str | None = None
     detail: str | None = None  # full error text (shown behind a "details" toggle)
+    server_ip: str | None = None  # the server's own IP on the route toward this TV
+    subnet_mismatch: bool = False  # server and TV look to be on different subnets
 
 
 class BirdnetStatus(BaseModel):
@@ -421,6 +424,37 @@ def _gemini_status(*, probe: bool = False) -> GeminiStatus:
     )
 
 
+def _local_ip_toward(host: str) -> str | None:
+    """The server's own source IP the OS would use to reach ``host`` (sends nothing).
+
+    A UDP ``connect`` only resolves the route locally — no packets leave — so this is
+    cheap and works even when ``host`` is unreachable, as long as a route exists.
+    """
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.connect((host, 9))  # port 9 (discard) is never actually contacted
+            return str(sock.getsockname()[0])
+    except OSError:
+        return None
+
+
+def _different_subnet(server_ip: str | None, tv_ip: str) -> bool:
+    """Best-effort: True if server and TV look to be on different /24 subnets.
+
+    Uses a /24 mask — the near-universal home-LAN case. Only meant as a hint when the
+    TV is unreachable, so on a wider-mask network (where /24 would over-report) it never
+    becomes a false alarm because the UI shows it only alongside a failed connection.
+    Returns False when either address isn't a plain IPv4 literal (e.g. a hostname).
+    """
+    if not server_ip:
+        return False
+    try:
+        net = ipaddress.ip_network(f"{server_ip}/24", strict=False)
+        return ipaddress.ip_address(tv_ip) not in net
+    except ValueError:
+        return False
+
+
 def _tv_status(ip: str, *, pair: bool = False) -> TvStatus:
     """REST device info, plus authoritative Art-mode state over the websocket.
 
@@ -430,11 +464,21 @@ def _tv_status(ip: str, *, pair: bool = False) -> TvStatus:
     auto-checks pass ``pair=False`` so they never pop up.
     """
     logger.info("Checking TV at %s", ip)
+    # Compute this first: a subnet mismatch makes the REST/websocket calls below fail, so
+    # the hint has to ride along on the unreachable path too (it's the likely cause).
+    server_ip = _local_ip_toward(ip)
+    subnet_mismatch = _different_subnet(server_ip, ip)
     try:
         info = get_device_info(ip)
     except Exception as exc:
         logger.warning("TV %s unreachable: %s", ip, exc)
-        return TvStatus(connected=False, message="Could not reach the TV.", detail=str(exc))
+        return TvStatus(
+            connected=False,
+            message="Could not reach the TV.",
+            detail=str(exc),
+            server_ip=server_ip,
+            subnet_mismatch=subnet_mismatch,
+        )
     device = info.get("device", {})
 
     def truthy(value: object) -> bool:
@@ -462,6 +506,8 @@ def _tv_status(ip: str, *, pair: bool = False) -> TvStatus:
         art_mode_on=art_mode_on,
         paired=paired,
         token_auth=truthy(device.get("TokenAuthSupport")),
+        server_ip=server_ip,
+        subnet_mismatch=subnet_mismatch,
     )
     logger.info(
         "TV %s: %s (supports Art Mode: %s, in Art Mode: %s)",
