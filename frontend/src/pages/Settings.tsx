@@ -16,7 +16,8 @@ import birdnetIcon from '@/assets/icons/birdnet.png'
 import storageIcon from '@/assets/icons/storage.png'
 import weatherIcon from '@/assets/icons/weather.png'
 
-const MODELS = ['gemini-3-pro-image', 'gemini-2.5-flash-image']
+// Image models Google currently serves; keep in sync with ImageModel in config.py.
+const MODELS = ['gemini-nano-banana-2.1', 'gemini-3-pro-image']
 const SIZES = ['1K', '2K', '4K']
 
 function BirdnetStatusLine({ status }: { status: BirdnetStatus | 'loading' }) {

@@ -1,9 +1,10 @@
 """Google Gemini image generation for BirdScreen.
 
 Generates the daily bird poster from a text prompt using Gemini's native image
-models ("Nano Banana"). The default is ``gemini-3-pro-image`` (Nano Banana Pro),
-which is built for complex layouts and precise text rendering — important for
-posters with species labels (Norwegian + Latin names).
+models ("Nano Banana"). The default is ``gemini-nano-banana-2.1`` (Nano Banana 2.1),
+which renders text accurately — important for posters with species labels
+(Norwegian + Latin names) — at about a third of the cost of ``gemini-3-pro-image``
+(Nano Banana Pro), the premium alternative.
 
 Setup:
   1. Create an API key at https://aistudio.google.com/apikey
@@ -36,9 +37,9 @@ logger = logging.getLogger(__name__)
 # Search upward from CWD so a project-root .env is found even when installed.
 load_dotenv(find_dotenv(usecwd=True))
 
-# Nano Banana Pro — best text rendering / complex layouts. Override with the
-# BIRDSCREEN_IMAGE_MODEL env var or the --model flag.
-DEFAULT_IMAGE_MODEL = os.environ.get("BIRDSCREEN_IMAGE_MODEL", "gemini-3-pro-image")
+# Nano Banana 2.1 — correct labels and natural scale at ~$0.07 per 2K poster. Override
+# with the BIRDSCREEN_IMAGE_MODEL env var or the --model flag.
+DEFAULT_IMAGE_MODEL = os.environ.get("BIRDSCREEN_IMAGE_MODEL", "gemini-nano-banana-2.1")
 # The Frame is a 4K 16:9 panel; 2K is a good cost/quality default for iteration.
 DEFAULT_ASPECT_RATIO = "16:9"
 DEFAULT_IMAGE_SIZE = "2K"
@@ -68,7 +69,7 @@ def get_client(api_key: str | None = None) -> genai.Client:
 # prepaid billing with the image model, so on a billing-enabled key a depleted balance
 # 429s here too. Caveat: if the account keeps free-tier quota for this text model that the
 # paid image model lacks, a live probe can read "ok" while image generation still fails.
-PROBE_MODEL = os.environ.get("BIRDSCREEN_TEXT_MODEL", "gemini-2.5-flash")
+PROBE_MODEL = os.environ.get("BIRDSCREEN_TEXT_MODEL", "gemini-3.8-flash")
 
 # Substrings Google uses when *prepaid billing is depleted* (as opposed to a plain,
 # self-healing rate limit) — both surface as HTTP 429 RESOURCE_EXHAUSTED.
@@ -213,7 +214,7 @@ def list_image_models(client: genai.Client | None = None) -> list[str]:
     names: list[str] = []
     for model in client.models.list():
         name = (model.name or "").removeprefix("models/")
-        if "image" in name or "imagen" in name:
+        if "image" in name or "banana" in name:
             names.append(name)
     return names
 

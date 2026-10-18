@@ -21,8 +21,9 @@ from pydantic import BaseModel
 from birdscreen.gemini import get_client
 from birdscreen.usage import Usage, usage_from_response
 
-# Cheap/fast text model for the environment description. Override via env.
-SEASON_MODEL = os.environ.get("BIRDSCREEN_TEXT_MODEL", "gemini-2.5-flash")
+# Text model for the environment description — 3.8 Flash names concrete local plants
+# and landmarks (richer posters) for well under a cent per call. Override via env.
+SEASON_MODEL = os.environ.get("BIRDSCREEN_TEXT_MODEL", "gemini-3.8-flash")
 
 
 class SeasonInfo(BaseModel):

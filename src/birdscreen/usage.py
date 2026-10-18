@@ -13,10 +13,10 @@ from dataclasses import dataclass
 # USD per 1M tokens: {model: {"input": ..., "output": ...}}.
 # For image models "output" is the image-token rate.
 PRICING: dict[str, dict[str, float]] = {
+    "gemini-nano-banana-2.1": {"input": 1.50, "output": 30.00},
     "gemini-3-pro-image": {"input": 2.00, "output": 120.00},
-    "gemini-3.1-flash-image": {"input": 0.50, "output": 60.00},
-    "gemini-2.5-flash-image": {"input": 0.30, "output": 30.00},
-    "gemini-2.5-flash": {"input": 0.30, "output": 2.50},
+    # Introductory price through 2026-12-31; $1.50 / $7.50 from 2027-01-01.
+    "gemini-3.8-flash": {"input": 0.75, "output": 3.75},
 }
 
 

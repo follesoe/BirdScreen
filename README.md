@@ -209,19 +209,23 @@ history DB, not the filename.
 
 ## Image models
 
-Gemini's native image models ("Nano Banana"). Default is **`gemini-3-pro-image`** (Pro) — richest
-linework and correct captions beside each bird. Pricing is image-output per 1M tokens; lowering Pro's
-resolution barely lowers its cost (a roughly fixed reasoning-token pool), so render Pro at 4K.
+Gemini's native image models ("Nano Banana"), picked under **Settings** — only models Google
+currently serves are offered. Default is **`gemini-nano-banana-2.1`** — correct serif captions
+beside each bird (æ/ø/å included) and natural relative bird sizes, at about a third of Pro's price.
+Pricing is image-output per 1M tokens, plus a little for the model's thinking.
 
-| Model | Per image | Craft | Text / labels |
+| Model | Per 2K image | Craft | Text / labels |
 |---|---|---|---|
-| **`gemini-3-pro-image`** (Pro) | ~$0.21–0.33 | ★★★ | ✅ correct, beside each bird |
-| `gemini-2.5-flash-image` | ~$0.039 | ★★ | ❌ garbled — pair with `--no-labels` + our composited labels |
+| **`gemini-nano-banana-2.1`** (Nano Banana 2.1) | ~$0.07 | ★★★ | ✅ correct, beside each bird |
+| `gemini-3-pro-image` (Nano Banana Pro) | ~$0.15–0.21 | ★★★ | ✅ beside each bird; occasional typos |
+
+The season/scenery description that feeds the prompt comes from a text model, **`gemini-3.8-flash`**
+(override with `BIRDSCREEN_TEXT_MODEL`), for well under a cent per poster.
 
 ## Super-resolution
 
-The Frame panel is native **3840×2160**. Pro at 4K renders larger → downscaled crisp; Flash renders
-~1 MP → upscaled with **Real-ESRGAN** (`RealESRGAN_x4plus`) via
+The Frame panel is native **3840×2160**. A 4K render is larger → downscaled crisp; the default 2K
+render (2752×1536) is upscaled with **Real-ESRGAN** (`RealESRGAN_x4plus`) via
 [spandrel](https://github.com/chaiNNer-org/spandrel) + PyTorch on the Apple GPU (MPS), tiled. It's a
 restoration model, not a plain resize. Weights auto-download to `models/` on first use. (torch/spandrel
 are now regular dependencies, so upscaling works from the web app.)

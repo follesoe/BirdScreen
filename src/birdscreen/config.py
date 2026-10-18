@@ -9,12 +9,18 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Literal
 
 import yaml
 from pydantic import BaseModel, Field
 
 # Override with BIRDSCREEN_CONFIG (used by tests so they never touch the real file).
 CONFIG_PATH = Path(os.environ.get("BIRDSCREEN_CONFIG", "config.yaml"))
+
+# Image models selectable in Settings — only ones Google currently serves (GA, not
+# deprecated), so a retired or mistyped model can't be saved. Nano Banana 2.1 is the
+# default; Pro is the premium option. Keep in sync with MODELS in Settings.tsx.
+ImageModel = Literal["gemini-nano-banana-2.1", "gemini-3-pro-image"]
 
 
 class ActiveWindow(BaseModel):
@@ -46,7 +52,7 @@ class ScheduleConfig(BaseModel):
 class SettingsConfig(BaseModel):
     """General settings — rendering, the BirdNET-Go source, and weather. Grows over time."""
 
-    model: str = "gemini-3-pro-image"
+    model: ImageModel = "gemini-nano-banana-2.1"
     image_size: str = "2K"
     upscale: bool = True
     birdnet_url: str = "http://localhost:8080"
@@ -66,10 +72,10 @@ class ModelCost(BaseModel):
 def _default_pricing() -> dict[str, ModelCost]:
     # Defaults from https://ai.google.dev/gemini-api/docs/pricing — override in config.yaml.
     return {
+        "gemini-nano-banana-2.1": ModelCost(input=1.50, output=30.00),
         "gemini-3-pro-image": ModelCost(input=2.00, output=120.00),
-        "gemini-3.1-flash-image": ModelCost(input=0.50, output=60.00),
-        "gemini-2.5-flash-image": ModelCost(input=0.30, output=30.00),
-        "gemini-2.5-flash": ModelCost(input=0.30, output=2.50),
+        # Introductory price through 2026-12-31; $1.50 / $7.50 from 2027-01-01.
+        "gemini-3.8-flash": ModelCost(input=0.75, output=3.75),
     }
 
 

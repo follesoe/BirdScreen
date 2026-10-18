@@ -10,6 +10,12 @@ def test_cost_pro_image() -> None:
     assert round(usage.cost_usd() or 0.0, 4) == 0.2408
 
 
+def test_cost_nano_banana_21_image() -> None:
+    # A 2K render: input 706/1e6*$1.50 + 1680 image tokens/1e6*$30 = 0.001059 + 0.0504
+    usage = Usage(model="gemini-nano-banana-2.1", input_tokens=706, output_tokens=1680)
+    assert round(usage.cost_usd() or 0.0, 4) == 0.0515
+
+
 def test_cost_unknown_model_is_none() -> None:
     assert Usage(model="mystery-model", input_tokens=1, output_tokens=1).cost_usd() is None
 
@@ -21,7 +27,7 @@ def test_price_lookup_tolerates_preview_suffix() -> None:
 
 def test_summarize_aggregates_tokens_and_cost() -> None:
     usages = [
-        Usage("gemini-2.5-flash", 200, 50),
+        Usage("gemini-3.8-flash", 200, 50),
         Usage("gemini-3-pro-image", 400, 2000),
     ]
     out = summarize(usages)
