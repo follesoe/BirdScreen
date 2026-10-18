@@ -182,7 +182,7 @@ Written/read by the web UI; missing file → sensible defaults. Top-level sectio
 - **`schedule`** — `day_reset`, `daily_cap`, `debounce_minutes`, `min_spacing_minutes`, `weekday_windows` / `weekend_windows` (each `start`/`end`, may cross midnight), and `light_refresh` (repaint at **midday / evening / dusk** to track changing light + weather even when no new birds arrive — sun times computed offline with [`astral`](https://github.com/sffjunkie/astral), bounded by the cap/spacing).
 - **`settings`** — `model`, `image_size`, `upscale`, `birdnet_url`, `use_weather`, optional `latitude`/`longitude`.
 - **`tvs`** — list of `{ name, ip, enabled, monitor_art_mode }`.
-- **`pricing`** — per model `{ input, output }` USD per 1M tokens; used to record each generation's estimated cost. **Edit these to keep token prices current.**
+- **`pricing`** — per model `{ input, output, output_text }` USD per 1M tokens; used to record each generation's estimated cost. Image models bill image tokens at `output` and text + thinking tokens at `output_text`; text models omit `output_text`. **Edit these to keep token prices current.**
 
 `.env` holds `GEMINI_API_KEY` (required) and optional `BIRDSCREEN_IMAGE_MODEL` / `BIRDSCREEN_TEXT_MODEL`.
 Weather (yr.no/MET) and geocoding (Nominatim) are keyless; set `BIRDSCREEN_USER_AGENT` to your own

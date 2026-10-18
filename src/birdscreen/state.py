@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS generations (
     image_size   TEXT NOT NULL,
     output       TEXT,                     -- poster filename
     prompt       TEXT,                     -- the full prompt sent to the image model
-    total_tokens INTEGER,                  -- Gemini tokens used (image + text calls)
+    total_tokens INTEGER,                  -- Gemini tokens used (all calls, incl. thinking)
     cost_usd     REAL                      -- estimated cost in USD at generation time
 );
 """

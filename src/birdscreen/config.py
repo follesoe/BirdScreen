@@ -62,18 +62,24 @@ class SettingsConfig(BaseModel):
 
 
 class ModelCost(BaseModel):
-    """USD per 1,000,000 tokens for a model (for image models, ``output`` is the
-    image-token rate). Edit ``pricing`` in config.yaml to track current prices."""
+    """USD per 1,000,000 tokens for a model. Edit ``pricing`` in config.yaml to track
+    current prices.
+
+    ``output`` is the response-token rate. Image models bill image tokens at ``output``
+    and their text + thinking tokens at ``output_text``; text models leave
+    ``output_text`` unset, so all their output (thinking included) uses ``output``.
+    """
 
     input: float = 0.0
     output: float = 0.0
+    output_text: float | None = None
 
 
-def _default_pricing() -> dict[str, ModelCost]:
-    # Defaults from https://ai.google.dev/gemini-api/docs/pricing — override in config.yaml.
+def default_pricing() -> dict[str, ModelCost]:
+    """Paid-tier prices from https://ai.google.dev/gemini-api/docs/pricing."""
     return {
-        "gemini-nano-banana-2.1": ModelCost(input=1.50, output=30.00),
-        "gemini-3-pro-image": ModelCost(input=2.00, output=120.00),
+        "gemini-nano-banana-2.1": ModelCost(input=1.50, output=30.00, output_text=7.50),
+        "gemini-3-pro-image": ModelCost(input=2.00, output=120.00, output_text=12.00),
         # Introductory price through 2026-12-31; $1.50 / $7.50 from 2027-01-01.
         "gemini-3.8-flash": ModelCost(input=0.75, output=3.75),
     }
@@ -99,7 +105,7 @@ class BirdScreenConfig(BaseModel):
     settings: SettingsConfig = Field(default_factory=SettingsConfig)
     tvs: list[TvConfig] = Field(default_factory=list)
     # USD per 1M tokens, per model — edit to keep token costs current.
-    pricing: dict[str, ModelCost] = Field(default_factory=_default_pricing)
+    pricing: dict[str, ModelCost] = Field(default_factory=default_pricing)
 
 
 def load_config() -> BirdScreenConfig:

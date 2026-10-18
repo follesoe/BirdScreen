@@ -13,10 +13,10 @@ from datetime import datetime
 from pathlib import Path
 
 from birdscreen import birdnet, engine, state
-from birdscreen.config import ModelCost, SettingsConfig, load_config
+from birdscreen.config import SettingsConfig, load_config
 from birdscreen.pipeline import make_poster
 from birdscreen.poster import Bird, PosterRequest
-from birdscreen.usage import Usage, summarize
+from birdscreen.usage import Usage, summarize, tally_cost
 
 logger = logging.getLogger(__name__)
 
@@ -38,27 +38,6 @@ def _resolve_location(settings: SettingsConfig) -> tuple[float, float] | None:
 def _upscale_model(settings: SettingsConfig) -> str | None:
     """The Real-ESRGAN model name when upscaling is enabled, else None."""
     return _UPSCALE_MODEL if settings.upscale else None
-
-
-def _rate_for(pricing: dict[str, ModelCost], model: str) -> ModelCost | None:
-    name = model.removeprefix("models/")
-    if name in pricing:
-        return pricing[name]
-    return next((rate for key, rate in pricing.items() if name.startswith(key)), None)
-
-
-def _tally_cost(usages: list[Usage], pricing: dict[str, ModelCost]) -> tuple[int, float | None]:
-    """Total tokens and estimated USD cost for a batch of Gemini calls (None if unpriced)."""
-    total_tokens = sum(u.total_tokens for u in usages)
-    cost = 0.0
-    priced = False
-    for usage in usages:
-        rate = _rate_for(pricing, usage.model)
-        if rate is None:
-            continue
-        cost += usage.input_tokens / 1e6 * rate.input + usage.output_tokens / 1e6 * rate.output
-        priced = True
-    return total_tokens, (round(cost, 6) if priced else None)
 
 
 def generate_now(*, trigger: str = "manual", reason: str | None = None) -> state.GenerationRecord:
@@ -100,8 +79,8 @@ def generate_now(*, trigger: str = "manual", reason: str | None = None) -> state
         if extra != result.image_path:
             extra.unlink(missing_ok=True)
 
-    total_tokens, cost_usd = _tally_cost(usage, config.pricing)
-    logger.info("Generation token usage:\n%s", summarize(usage))
+    total_tokens, cost_usd = tally_cost(usage, config.pricing)
+    logger.info("Generation token usage:\n%s", summarize(usage, config.pricing))
 
     record = state.GenerationRecord(
         trigger=trigger,
