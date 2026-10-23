@@ -84,6 +84,7 @@ export const en = {
     tvsTitle: 'Frame TVs',
     tvsEmpty: 'No TVs configured yet.',
     paused: 'paused',
+    waitingForTv: 'new poster hangs when it is back in Art Mode',
     historyTitle: 'History',
     historyEmpty: 'No posters generated yet.',
     viewPoster: 'View poster',

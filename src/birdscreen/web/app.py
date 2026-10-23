@@ -14,6 +14,7 @@ import socket
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -30,7 +31,7 @@ from birdscreen.config import ScheduleConfig, SettingsConfig, TvConfig, load_con
 from birdscreen.geocode import reverse_geocode
 from birdscreen.images import prepare_for_frame
 from birdscreen.logging_config import recent_logs, setup_logging
-from birdscreen.samsung_tv import art_state, get_device_info, replace_art
+from birdscreen.samsung_tv import art_state, get_device_info, is_reachable, replace_art
 from birdscreen.weather import fetch_current_weather
 
 logger = logging.getLogger(__name__)
@@ -45,6 +46,27 @@ _generation_lock = threading.Lock()  # prevents overlapping manual/auto generati
 _geocode_cache: dict[tuple[float, float], str | None] = {}  # coords → place name (stable)
 _coords_cache: dict[str, tuple[float, float] | None] = {}  # birdnet_url → lat/lon (stable)
 _SCHEDULER_INTERVAL_S = 120  # how often the auto-generation loop re-checks the rules
+# Quick "is the TV awake?" check before an automatic upload. A sleeping Frame drops off
+# the network, and a plain upload then burns ~2.5 min on two 75 s connect timeouts.
+_TV_PROBE_TIMEOUT_S = 5.0
+_TV_ASLEEP = "no answer, the TV is off or asleep"
+_tv_lock = threading.Lock()  # one push to the TVs at a time (generation, retry, manual)
+# A TV that answers but still rejects a retried poster (e.g. an 'Allow' popup is waiting)
+# is tried again after this long, and given up on after a few failures.
+_RETRY_BACKOFF_S = 600
+_RETRY_MAX_FAILURES = 3
+
+
+@dataclass
+class _RetryBackoff:
+    """Failed retries of the poster waiting for one TV."""
+
+    poster: str
+    failures: int = 0
+    not_before: float = 0.0  # time.monotonic()
+
+
+_retry_backoff: dict[str, _RetryBackoff] = {}  # TV ip → its waiting poster's failed tries
 
 
 class _SchedulerState:
@@ -169,6 +191,7 @@ class StatusResponse(BaseModel):
     species_today: list[str]
     last_generation: GenerationLogEntry | None
     tvs: list[TvConfig]
+    waiting_tvs: list[str] = []  # enabled TVs that missed a poster; it hangs when they wake
 
 
 class GenerateResult(BaseModel):
@@ -241,10 +264,18 @@ def list_posters() -> list[PosterInfo]:
     return sorted(items, key=lambda p: p.modified, reverse=True)
 
 
-def _safe_poster_path(name: str) -> Path:
-    """Resolve ``name`` inside ``posters/``, guarding against path traversal."""
+def _poster_path(name: str) -> Path | None:
+    """Resolve ``name`` inside ``posters/`` (guarding against path traversal), or None."""
     path = (POSTERS_DIR / name).resolve()
-    if POSTERS_DIR.resolve() not in path.parents or not path.is_file():
+    if not name or POSTERS_DIR.resolve() not in path.parents or not path.is_file():
+        return None
+    return path
+
+
+def _safe_poster_path(name: str) -> Path:
+    """Like ``_poster_path`` but a 404 for the API when there's no such poster."""
+    path = _poster_path(name)
+    if path is None:
         raise HTTPException(status_code=404, detail="poster not found")
     return path
 
@@ -273,14 +304,33 @@ def _thumbnail(name: str) -> Path:
     return thumb
 
 
+def _tv_file(kind: str, ip: str) -> Path:
+    """Per-TV state file, e.g. ``.tv-art-192-168-1-219`` (so TVs don't clobber each other)."""
+    return Path(f".tv-{kind}-{ip.replace('.', '-').replace(':', '-')}")
+
+
 def _tv_token_file(ip: str) -> Path:
-    """Per-TV Art-websocket token file (so multiple TVs don't clobber each other)."""
-    return Path(f".tv-token-{ip.replace('.', '-').replace(':', '-')}")
+    """Per-TV Art-websocket token file."""
+    return _tv_file("token", ip)
 
 
 def _tv_art_file(ip: str) -> Path:
     """Per-TV file caching the content_id of the poster currently hung on it."""
-    return Path(f".tv-art-{ip.replace('.', '-').replace(':', '-')}")
+    return _tv_file("art", ip)
+
+
+def _tv_pending_file(ip: str) -> Path:
+    """Per-TV file naming a poster that missed the TV and is waiting to be hung.
+
+    A file (not memory) so a restart doesn't forget it. Cleared by any successful hang.
+    """
+    return _tv_file("pending", ip)
+
+
+def _tv_paired(ip: str) -> bool:
+    """True once the TV's 'Allow' popup has been accepted (a token is cached)."""
+    token = _tv_token_file(ip)
+    return token.exists() and token.stat().st_size > 0
 
 
 # Durable copy of the passive Gemini error so it survives a process restart. Without it,
@@ -485,7 +535,7 @@ def _tv_status(ip: str, *, pair: bool = False) -> TvStatus:
         return str(value).lower() == "true"
 
     token = _tv_token_file(ip)
-    paired = token.exists() and token.stat().st_size > 0
+    paired = _tv_paired(ip)
     supports = truthy(device.get("FrameTVSupport"))
     art_mode_on: bool | None = None
     if pair or paired:
@@ -714,6 +764,7 @@ def _compute_status() -> StatusResponse:
         species_today=species,
         last_generation=_to_log_entry(last) if last else None,
         tvs=config.tvs,
+        waiting_tvs=[tv.name for tv in _waiting_tvs(config.tvs)],
     )
 
 
@@ -730,8 +781,8 @@ def _run_generation_locked(trigger: str, reason: str) -> None:
         record = generate.generate_now(trigger=trigger, reason=reason)
         _clear_gemini_error()  # Gemini produced an image → credits/key are fine
         if record.output:
-            result = _send_to_tvs(record.output, enabled_only=True)
-            logger.info("Hung %s — %s", record.output, result.message)
+            result = _send_to_tvs(record.output, automatic=True)
+            logger.info("Sent %s to TVs — %s", record.output, result.message)
     except Exception as exc:
         logger.exception("Generation failed (%s)", trigger)
         _record_gemini_error(exc)  # no-ops unless exc is a genuine Gemini error
@@ -739,61 +790,180 @@ def _run_generation_locked(trigger: str, reason: str) -> None:
         _generation_lock.release()
 
 
-def _send_to_tvs(name: str, *, enabled_only: bool = False) -> SendResult:
+def _frame_ready(poster: Path) -> Path:
+    """Write the Frame-ready JPEG of ``poster`` (the one uploaded to the TVs)."""
+    Path("cache").mkdir(exist_ok=True)
+    return prepare_for_frame(poster, dst=Path("cache/birdscreen.jpg"))
+
+
+def _hang_on_tv(tv: TvConfig, name: str, frame_ready: Path, *, quick_check: bool) -> str | None:
+    """Hang one poster on one TV. Returns None on success, else the error text.
+
+    The caller must hold ``_tv_lock``. With ``quick_check`` a TV that doesn't answer
+    within a few seconds fails at once, instead of after ~2.5 min of connect timeouts.
+    A successful hang supersedes any poster still waiting for this TV.
+    """
+    if quick_check and not is_reachable(tv.ip, timeout=_TV_PROBE_TIMEOUT_S):
+        logger.warning("Could not hang %s on %s: %s", name, tv.name, _TV_ASLEEP)
+        return _TV_ASLEEP
+    art_file = _tv_art_file(tv.ip)
+    # BirdScreen's own last upload on this TV; only this is deleted, so the user's
+    # personal photos are never touched.
+    previous = art_file.read_text(encoding="utf-8").strip() if art_file.exists() else None
+    try:
+        content_id = replace_art(
+            tv.ip,
+            frame_ready,
+            token_file=str(_tv_token_file(tv.ip)),
+            previous_id=previous or None,
+        )
+    except Exception as exc:
+        logger.warning("Could not hang %s on %s: %s", name, tv.name, exc)
+        return str(exc)
+    art_file.write_text(content_id, encoding="utf-8")
+    _tv_pending_file(tv.ip).unlink(missing_ok=True)
+    _retry_backoff.pop(tv.ip, None)
+    logger.info("Hung %s on %s (content_id=%s)", name, tv.name, content_id)
+    return None
+
+
+def _send_to_tvs(name: str, *, automatic: bool = False) -> SendResult:
     """Hang ``name`` on the configured TVs, overwriting BirdScreen's previous poster.
 
-    With ``enabled_only`` the push is limited to TVs whose 'update' toggle is on — used
-    by automatic generation; the manual button targets all configured TVs.
+    ``automatic`` is the after-generation push: only TVs whose 'update' toggle is on,
+    a quick is-it-awake check first, and a TV that can't be reached is queued to get
+    the poster when it wakes (see ``_retry_pending_hangs``). The manual button targets
+    every configured TV, waits out the full connect timeout, and queues nothing.
     """
     poster = _safe_poster_path(name)
     tvs = load_config().tvs
-    if enabled_only:
+    if automatic:
         tvs = [tv for tv in tvs if tv.enabled]
     if not tvs:
-        msg = (
-            "No TVs are enabled for updates."
-            if enabled_only
-            else "No Frame TVs are configured yet."
-        )
+        msg = "No TVs are enabled for updates." if automatic else "No Frame TVs are configured yet."
         return SendResult(ok=False, message=msg)
 
-    Path("cache").mkdir(exist_ok=True)
-    frame_ready = prepare_for_frame(poster, dst=Path("cache/birdscreen.jpg"))
-
+    # The automatic push waits its turn; a manual click shouldn't hang the request
+    # behind a slow upload that's already running.
+    if not _tv_lock.acquire(blocking=automatic):
+        return SendResult(
+            ok=False, message="A poster is being hung on the TV right now. Try again in a minute."
+        )
     hung: list[str] = []
     failed: list[str] = []
-    for tv in tvs:
-        art_file = _tv_art_file(tv.ip)
-        # BirdScreen's own last upload on this TV; only this is deleted, so the user's
-        # personal photos are never touched.
-        previous = art_file.read_text(encoding="utf-8").strip() if art_file.exists() else None
-        try:
-            content_id = replace_art(
-                tv.ip,
-                frame_ready,
-                token_file=str(_tv_token_file(tv.ip)),
-                previous_id=previous or None,
-            )
-            art_file.write_text(content_id, encoding="utf-8")
-            hung.append(tv.name)
-            logger.info("Hung %s on %s (content_id=%s)", name, tv.name, content_id)
-        except Exception as exc:
-            failed.append(f"{tv.name} ({exc})")
-            logger.warning("Could not hang %s on %s: %s", name, tv.name, exc)
+    try:
+        frame_ready = _frame_ready(poster)
+        for tv in tvs:
+            error = _hang_on_tv(tv, name, frame_ready, quick_check=automatic)
+            if error is None:
+                hung.append(tv.name)
+                continue
+            failed.append(f"{tv.name} ({error})")
+            if automatic:
+                _tv_pending_file(tv.ip).write_text(name, encoding="utf-8")
+                logger.info("Will hang %s on %s when it is back online", name, tv.name)
+    finally:
+        _tv_lock.release()
 
+    later = " Will retry when it's back online." if automatic else ""
     if hung and not failed:
         return SendResult(ok=True, message=f"Hung on {', '.join(hung)}.")
     if hung:
         return SendResult(
-            ok=True, message=f"Hung on {', '.join(hung)}; couldn't reach {', '.join(failed)}."
+            ok=True,
+            message=f"Hung on {', '.join(hung)}; couldn't reach {', '.join(failed)}.{later}",
         )
     return SendResult(
         ok=False,
         message=(
             f"Couldn't reach {', '.join(failed)}. "
             "If the TV shows an 'Allow' popup, accept it with the remote and try again."
+            f"{later}"
         ),
     )
+
+
+def _pending_poster(tv: TvConfig) -> Path | None:
+    """The poster still waiting to be hung on ``tv``, or None (nothing, or it's gone)."""
+    pending_file = _tv_pending_file(tv.ip)
+    if not pending_file.exists():
+        return None
+    return _poster_path(pending_file.read_text(encoding="utf-8").strip())
+
+
+def _waiting_tvs(tvs: list[TvConfig]) -> list[TvConfig]:
+    """Enabled TVs with a poster still waiting to be hung."""
+    return [tv for tv in tvs if tv.enabled and _pending_poster(tv) is not None]
+
+
+def _drop_pending(tv: TvConfig, why: str) -> None:
+    logger.info("No longer waiting to hang a poster on %s: %s", tv.name, why)
+    _tv_pending_file(tv.ip).unlink(missing_ok=True)
+    _retry_backoff.pop(tv.ip, None)
+
+
+def _retry_failed(tv: TvConfig, poster: Path, error: str) -> None:
+    """The TV answered but the hang failed: back off, and give up after a few tries."""
+    if not is_reachable(tv.ip, timeout=_TV_PROBE_TIMEOUT_S):
+        return  # it went back to sleep mid-try: keep waiting, that's not a failure
+    backoff = _retry_backoff.get(tv.ip)
+    if backoff is None or backoff.poster != poster.name:
+        backoff = _retry_backoff[tv.ip] = _RetryBackoff(poster.name)
+    backoff.failures += 1
+    if backoff.failures >= _RETRY_MAX_FAILURES:
+        _drop_pending(tv, f"gave up after {backoff.failures} failed tries ({error})")
+    else:
+        backoff.not_before = time.monotonic() + _RETRY_BACKOFF_S
+
+
+def _retry_hang(tv: TvConfig, poster: Path) -> None:
+    """Hang ``poster`` on ``tv`` if it's awake, idle in Art Mode, and not backing off."""
+    backoff = _retry_backoff.get(tv.ip)
+    if backoff and backoff.poster == poster.name and time.monotonic() < backoff.not_before:
+        return
+    if not is_reachable(tv.ip, timeout=_TV_PROBE_TIMEOUT_S):
+        logger.debug("%s is still asleep; %s is waiting", tv.name, poster.name)
+        return
+    if not _tv_lock.acquire(blocking=False):
+        return  # another push is running (likely a newer poster); look again next tick
+    try:
+        if _pending_poster(tv) != poster:
+            return  # superseded while we were checking
+        try:
+            _supported, in_art_mode = art_state(tv.ip, str(_tv_token_file(tv.ip)))
+        except Exception as exc:
+            _retry_failed(tv, poster, str(exc))
+            return
+        if in_art_mode is False:
+            # Someone just turned it on to watch something; don't yank it into Art Mode.
+            logger.debug("%s is on but not in Art Mode; %s is waiting", tv.name, poster.name)
+            return
+        logger.info("%s is back in Art Mode; hanging %s", tv.name, poster.name)
+        error = _hang_on_tv(tv, poster.name, _frame_ready(poster), quick_check=False)
+        if error is not None:
+            _retry_failed(tv, poster, error)
+    finally:
+        _tv_lock.release()
+
+
+def _retry_pending_hangs() -> None:
+    """Hang posters that missed a TV (e.g. it was asleep) once it is back in Art Mode.
+
+    Runs every scheduler tick, also outside the active windows: it costs no tokens, just
+    a quick connection check while the TV is still away.
+    """
+    for tv in load_config().tvs:
+        if not _tv_pending_file(tv.ip).exists():
+            continue
+        poster = _pending_poster(tv)
+        if poster is None:
+            _drop_pending(tv, "the poster is gone")
+        elif not tv.enabled:
+            _drop_pending(tv, "updates are paused")  # the next poster after resuming wins
+        elif not _tv_paired(tv.ip):
+            _drop_pending(tv, "not paired")  # never pop the 'Allow' dialog in the background
+        else:
+            _retry_hang(tv, poster)
 
 
 def _auto_generate(trigger: str, reason: str) -> None:
@@ -889,6 +1059,11 @@ def _scheduler_loop() -> None:
             _tick()
         except Exception:
             logger.exception("Scheduler tick failed")
+        # After the tick, so a poster it just painted supersedes the one that was waiting.
+        try:
+            _retry_pending_hangs()
+        except Exception:
+            logger.exception("Retrying a missed TV hang failed")
 
 
 def _start_scheduler() -> None:

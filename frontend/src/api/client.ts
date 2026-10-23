@@ -116,6 +116,7 @@ export interface StatusResponse {
   species_today: string[]
   last_generation: GenerationLogEntry | null
   tvs: TvConfig[]
+  waiting_tvs: string[]
 }
 
 export interface GenerateResult {

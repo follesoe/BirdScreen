@@ -139,7 +139,13 @@ export function Status() {
     status.tvs.length === 0
       ? '—'
       : status.tvs
-          .map((tv) => (tv.enabled ? tv.name : `${tv.name} (${t('status.paused')})`))
+          .map((tv) =>
+            !tv.enabled
+              ? `${tv.name} (${t('status.paused')})`
+              : status.waiting_tvs.includes(tv.name)
+                ? `${tv.name} (${t('status.waitingForTv')})`
+                : tv.name,
+          )
           .join(', ')
 
   return (

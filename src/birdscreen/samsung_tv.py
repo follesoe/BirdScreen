@@ -105,6 +105,21 @@ def discover(timeout: float = 3.0) -> list[str]:
     return sorted(found)
 
 
+def is_reachable(host: str, timeout: float = 5.0) -> bool:
+    """True if the TV accepts a TCP connection on its Art port within ``timeout`` seconds.
+
+    A cheap "is it awake?" check. A sleeping Frame drops off the network, and a websocket
+    connect then waits out the OS connect timeout (~75 s). ``SamsungTVWS(timeout=...)``
+    can't be used to shorten that: it also caps every read, which an upload or a pending
+    'Allow' popup can legitimately exceed.
+    """
+    try:
+        with socket.create_connection((host, ART_WS_PORT), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
 def get_device_info(host: str) -> dict[str, Any]:
     """Return the TV's REST device-info dict (raises on connection failure)."""
     tv = SamsungTVWS(host=host, name=CLIENT_NAME)
